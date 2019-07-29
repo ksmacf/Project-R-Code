@@ -1,0 +1,64 @@
+########################### Some useful commands for MadAnalysis5 ################################
+
+### before importing models, choose analysis program/package/style
+####################################### hadron level events #######################################
+set main.fastsim.package = fastjet
+ - for hadron level
+set main.fastsim.radius = 0.5
+set main.fastsim.p = -0.5
+set main.merging.check = true
+ set main.merging.njets = 4
+
+####################################### detector level events #####################################
+set main.fastsim.package = delphes
+ - for detector simulation
+
+set main.fastsim.detector = <my-delphes-input-card>
+ - where cms(-ma5tune) for CMS OR atlas(-ma5tune) for ATLAS is the input card choice 
+	*() means the MadAnalysis5 tune version
+
+set main.fastsim.pileup = <minimum-bias-events.pileup>
+ - Pileup simulation 
+*need to provide path to a sample of minimum-bias events (.pileup extension stored in main.fastsim object)
+
+set main.fastsim.skim_eflow = true
+ - energy flow
+set main.fastsim.skim_genparticles = true
+ - Monte Carlo truth
+set main.fastsim.skim_towers = true
+ - energy edeposits in the calorimetric towers
+set main.fastsim.skim_tracks = true
+ - collection of tracks
+
+***default is all 'false' and outputs ROOT that is not skimmed (contains all information).
+***new physics event samples include non-standard final-state particles so need to moddify Delphes card.
+
+####################################### Plotting events #######################################
+set main.stacking_method = normalize2one
+
+### when importing files, use either
+import /home/user1/MG5_aMC_v2_6_5/t*t*~_1/Events/run_01/unweighted_events.lhe.gz as signal
+ - for parton level, OR
+import /home/user1/MG5_aMC_v2_6_5/t*t*~_1/Events/run_01/tag_1_pythia8_events.hepmc.gz  as signal
+ - for hadron (i.e. pythia)/detector level
+
+set signal.type = signal
+
+
+
+plot MET 100 0 500
+plot PT(b b~[1]) 100 0 500
+plot PT(l+) 100 0 500
+
+
+plot MEFF
+plot MHT
+plot SQRTS
+plot MT(b b~[1])
+plot MT_MET(b b~[1])
+plot MT(l+[1])
+plot MT_MET(l+[1])
+
+
+## Use below to output LHE format files
+set main.outputfile = "output.lhe"
