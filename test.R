@@ -5,3 +5,7 @@ library(xgboost)
 test <- read.delim("genLots_data.txt", sep = ",")
 
 test_rmv <- test %>% filter(Muon.PT != "0" | Electron.PT != "0") 
+
+plot <- ggplot(test, aes(x=MissingET.MET)) +
+  geom_histogram(aes(y=..density..), bins = 50)
+plot
