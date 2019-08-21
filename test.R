@@ -18,6 +18,7 @@ lepPT_check <- summary(test_rmv$Electron.PT_1==test_rmv$Muon.PT_1) # Check if PT
 
 test_rmv$lepton.PT <- test_rmv$Electron.PT + test_rmv$Muon.PT # Make a new variable to combine results as leptonPT
 
+
 plot <- ggplot(test, aes(x=MissingET.MET)) +
   geom_histogram(aes(y=..density..), bins = 52) +
   xlim(0, 500)
