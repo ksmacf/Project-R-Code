@@ -1,14 +1,10 @@
 library(tidyverse)
 library(gridExtra)
 library(dplyr)
-library(xgboost)
+library(caret)
 
-
-test <- read.delim(file = "BigData.txt", sep = ",")
-#MET <- read.delim("MET")
-#%lepPlusPT <- read.delim("lepPlusPT")
-#lepMinusPT <- read.delim("lepMinusPT")
-#Jet1PT <- read.delim("Jet1PT")
+# Load the data of interest
+test <- read.delim(file = "/home/user1/Desktop/Root files/BigData.txt", sep = ",")
 
 # Remove Electrons and Muons so that we have ONE lepton in each decay
 test_rmv <- test %>% 
@@ -17,12 +13,21 @@ test_rmv <- test %>%
   filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
 lepPT_check <- summary(test_rmv$Electron.PT_1==test_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
 
-
+# Data wrangling with Leptons
 test_rmv$Lepton.PT <- test_rmv$Electron.PT + test_rmv$Muon.PT # Make a new variable to combine results as leptonPT
+test_rmv$Lepton.Type <- as.factor(replace(test_rmv$Electron.PT_1, test_rmv$Electron.PT_1 > 0, "E")) +
+  as.factor(replace(test_rmv$Muon.PT_1, test_rmv$Muon.PT_1 > 0, "MU"))
+test_rmv <- select(test_rmv, -"Electron.PT_2", -"Electron.Eta_2", -"Electron.Phi_2", -"Muon.PT_2", -"Muon.Eta_2", -"Muon.Phi_2")
 
+# Plotting MET for the full set to do a check
+plot <- ggplot(test, aes(x=MissingET.MET)) +
+  geom_histogram(bins = 52) +
+  xlim(0, 500)
+bins <- ggplot_build(plot)$data[[1]]
+write.table(bins$y, file = "/home/user1/Desktop/Root files/bins.txt", col.names = "MET", row.names = FALSE)
 
 plot_MET <- ggplot(test_rmv, aes(x=MissingET.MET)) +
-  geom_histogram(aes(y=..density..), bins = 52) +
+  geom_histogram(bins = 52) + # aes(y=..density..), 
   xlim(0, 500)
 bins_MET <- ggplot_build(plot_MET)$data[[1]]
 write.table(bins_MET$y, file = "/home/user1/Desktop/Root files/bins_MET.txt", col.names = "MET", row.names = FALSE)
@@ -49,3 +54,7 @@ grid.arrange(plot_MET, plot_lepPT, plot_jet1, plot_jet2, nrow =2)
 
 library(h2o)
 localH2O = h2o.init()
+
+library(randomForest)
+
+library(xgboost)
