@@ -10,8 +10,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-Below is the beginning part of training the classifier.
+This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
 ```{r}
+library(tidyverse)
+library(gridExtra)
+library(dplyr)
+library(caret)
 # Load the data of interest
 stopData <- read.delim(file = "/home/user1/Desktop/Root files/stopData_1m_Default.txt", sep = ",")
 topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbarData_1m.txt", sep = ",")
@@ -53,11 +57,13 @@ topData_rmv <- topData_rmv %>%
   select(-grep(pattern="^Electron|^Muon",colnames(topData_rmv)))
 
 
-
 # Combine the stop and top data for a complete set
 Data_default <- rbind.data.frame(stopData_rmv, topData_rmv)
 Data_default <- Data_default[sample(nrow(Data_default)),]
+```
 
+Using the h2o package, we can can split the data set into training and test sets
+```{r, message=FALSE}
 # Run AutoML to find the possibly best model for this
 library(h2o)
 h2o.init()
@@ -66,8 +72,12 @@ n_seed = sample(1:1000000001, 1, replace=T)
 h_split <- h2o.splitFrame(DD_h2oVer, ratios = 0.75, seed = n_seed)
 h_train <- h_split[[1]] # 75% for modelling
 h_test <- h_split[[2]]
-
 features <- setdiff(colnames(Data_default), "Signal")
+```
+
+Within the h2o package, there is a function called "h2o.automl" which trains many models in order to obtain the best possible classifier.
+Number 1), with a k-fold cross-validation of k=5 and testing 20 models... 
+```{r}
 automl1 = h2o.automl(x = features,
                     y = "Signal",
                     training_frame = h_train,
@@ -77,7 +87,11 @@ automl1 = h2o.automl(x = features,
                     project_name = "automl_stop_search", # Specify a name so you can add more models later
                     seed = n_seed) 
 check1 <- automl1@leaderboard
+```
+Produced a result where a Stacking Ensemble was said to be best.
 
+Number 2), with a k-fold cross-validation of k=10 and testing 100 models... 
+```{r}
 automl2 = h2o.automl(x = features,
                     y = "Signal",
                     training_frame = h_train,
