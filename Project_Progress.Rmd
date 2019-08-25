@@ -5,6 +5,88 @@ date: "22/08/2019"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, eval = FALSE, echo = TRUE, tidy = TRUE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+
+Below is the beginning part of training the classifier.
+```{r}
+# Load the data of interest
+stopData <- read.delim(file = "/home/user1/Desktop/Root files/stopData_1m_Default.txt", sep = ",")
+topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbarData_1m.txt", sep = ",")
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+stopData_rmv <- stopData %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+lepPT_check <- summary(stopData_rmv$Electron.PT_1==stopData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
+
+topData_rmv <- topData %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+lepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
+
+# Data wrangling with Leptons
+stopData_rmv <- stopData_rmv %>%
+  mutate(
+  Lepton.PT = Electron.PT_1 + Muon.PT_1,
+  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+  Signal = rep(1,nrow(stopData_rmv))
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(stopData_rmv)))
+
+topData_rmv <- topData_rmv %>%
+  mutate(
+  Lepton.PT = Electron.PT_1 + Muon.PT_1,
+  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+  Signal = rep(0,nrow(topData_rmv))
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(topData_rmv)))
+
+
+
+# Combine the stop and top data for a complete set
+Data_default <- rbind.data.frame(stopData_rmv, topData_rmv)
+Data_default <- Data_default[sample(nrow(Data_default)),]
+
+# Run AutoML to find the possibly best model for this
+library(h2o)
+h2o.init()
+DD_h2oVer <- as.h2o(Data_default)
+n_seed = sample(1:1000000001, 1, replace=T)
+h_split <- h2o.splitFrame(DD_h2oVer, ratios = 0.75, seed = n_seed)
+h_train <- h_split[[1]] # 75% for modelling
+h_test <- h_split[[2]]
+
+features <- setdiff(colnames(Data_default), "Signal")
+automl1 = h2o.automl(x = features,
+                    y = "Signal",
+                    training_frame = h_train,
+                    nfolds = 5,                     # 5-fold Cross-Validation
+                    max_models = 20,                # Max number of models
+                    stopping_metric = "RMSE",       # Metric to optimize
+                    project_name = "automl_stop_search", # Specify a name so you can add more models later
+                    seed = n_seed) 
+check1 <- automl1@leaderboard
+
+automl2 = h2o.automl(x = features,
+                    y = "Signal",
+                    training_frame = h_train,
+                    nfolds = 10,                     # 5-fold Cross-Validation
+                    max_models = 100,                # Max number of models
+                    stopping_metric = "RMSE",       # Metric to optimize
+                    project_name = "automl_stop_search", # Specify a name so you can add more models later
+                    seed = n_seed) 
+check2 <- automl2@leaderboard
+
+```
+
