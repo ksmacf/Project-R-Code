@@ -87,6 +87,7 @@ automl1 = h2o.automl(x = features,
                     project_name = "automl_stop_search", # Specify a name so you can add more models later
                     seed = n_seed) 
 check1 <- automl1@leaderboard
+check1
 ```
 Produced a result where a Stacking Ensemble was said to be best.
 
@@ -101,6 +102,18 @@ automl2 = h2o.automl(x = features,
                     project_name = "automl_stop_search", # Specify a name so you can add more models later
                     seed = n_seed) 
 check2 <- automl2@leaderboard
-
+check2
 ```
-
+Number 3), with a k-fold cross-validation of k=10 and testing 200 models... 
+```{r}
+automl3 = h2o.automl(x = features,
+                    y = "Signal",
+                    training_frame = h_train,
+                    nfolds = 10,                     # 5-fold Cross-Validation
+                    max_models = 200,                # Max number of models
+                    stopping_metric = "RMSE",       # Metric to optimize
+                    project_name = "automl_stop_search", # Specify a name so you can add more models later
+                    seed = n_seed) 
+check3 <- automl3@leaderboard
+check3
+```
