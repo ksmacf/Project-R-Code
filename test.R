@@ -13,13 +13,20 @@ test_rmv <- test %>%
 lepPT_check <- summary(test_rmv$Electron.PT_1==test_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
 
 # Data wrangling with Leptons
-test_rmv$Lepton.PT <- test_rmv$Electron.PT_1 + test_rmv$Muon.PT_1 # Make a new variable to combine results as leptonPT
-test_rmv$Lepton.Eta <- test_rmv$Electron.Eta_1 +test_rmv$Muon.Eta_1
-test_rmv$Lepton.Phi <- test_rmv$Electron.Phi_1 + test_rmv$Muon.Phi_1
-test_rmv$Lepton.Type <- as.factor(replace(test_rmv$Electron.PT_1, test_rmv$Electron.PT_1 > 0, "E")) +
-  as.factor(replace(test_rmv$Muon.PT_1, test_rmv$Muon.PT_1 > 0, "MU"))
-test_rmv <- select(test_rmv, -"Electron.PT_2", -"Electron.Eta_2", -"Electron.Phi_2", -"Muon.PT_2", -"Muon.Eta_2", -"Muon.Phi_2")
-test_rmv$Signal <- length(test_rmv$MissingET.MET) <-1
+test_rmv <- test_rmv %>%
+  mutate(
+    Lepton.PT = Electron.PT_1 + Muon.PT_1,
+    Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+    Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+    Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+      as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+    Signal = rep(1,nrow(test_rmv))
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(test_rmv)))
+
+
+
+
 # Plotting MET for the full set to do a check
 plot <- ggplot(test, aes(x=MissingET.MET)) +
   geom_histogram(bins = 52) +
@@ -52,10 +59,3 @@ bins_jet2 <- ggplot_build(plot_jet2)$data[[1]]
 write.table(bins_jet2$y, file = "/home/user1/Desktop/Root files/bins_jet2.txt", col.names = "jet2", row.names = FALSE)
 
 grid.arrange(plot_MET, plot_lepPT, plot_jet1, plot_jet2, nrow =2)
-
-library(h2o)
-localH2O = h2o.init()
-
-library(randomForest)
-
-library(xgboost)
