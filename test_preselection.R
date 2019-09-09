@@ -2,7 +2,7 @@ library(tidyverse)
 library(dplyr)
 
 # Selection 1: Default values of Delphes card (check card)
-pre1 <- read.delim(file = "/home/user1/Desktop/Root files/topDefSmol.txt", sep = ",")
+pre1 <- read.delim(file = "/home/user1/Desktop/Root files/stopDefSmol.txt", sep = ",")
 
 # Remove Electrons and Muons so that we have ONE lepton in each decay
 pre1_rmv <- pre1 %>% 
@@ -24,7 +24,7 @@ pre1_rmv <- pre1_rmv %>%
   select(-grep(pattern="^Electron|^Muon",colnames(pre1_rmv)))
 
 # Selection 2: Efficiencies of electrons(muon) with PT>20GeV with |eta|<1.442 (2.4) at 85(95)% 
-pre2 <- read.delim(file = "/home/user1/Desktop/Root files/top1.txt", sep = ",")
+pre2 <- read.delim(file = "/home/user1/Desktop/Root files/stop1.txt", sep = ",")
 pre2_rmv <- pre2 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
   filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
@@ -43,7 +43,7 @@ pre2_rmv <- pre2_rmv %>%
 
 
 # Selection 2: Efficiencies of electrons(muon) with PT>20GeV with |eta|<2.5 (2.4) at 80(95)% 
-pre3 <- read.delim(file = "/home/user1/Desktop/Root files/top2.txt", sep = ",")
+pre3 <- read.delim(file = "/home/user1/Desktop/Root files/stop2.txt", sep = ",")
 
 pre3_rmv <- pre3 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
@@ -62,7 +62,7 @@ pre3_rmv <- pre3_rmv %>%
   select(-grep(pattern="^Electron|^Muon",colnames(pre3_rmv)))
 
 # Selection 3: COMBINED ALL INFORMATION TO MAKE A DEFAULT SET
-pre4 <- read.delim(file = "/home/user1/Desktop/Root files/newtop.txt", sep = ",")
+pre4 <- read.delim(file = "/home/user1/Desktop/Root files/newstop.txt", sep = ",")
 
 pre4_rmv <- pre4 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
@@ -81,7 +81,7 @@ pre4_rmv <- pre4_rmv %>%
   select(-grep(pattern="^Electron|^Muon",colnames(pre4_rmv)))
 
 # Selection 4: COMBINED ALL INFORMATION TO MAKE A DEFAULT SET (with software default run card)
-pre5 <- read.delim(file = "/home/user1/Desktop/Root files/newtop2.txt", sep = ",")
+pre5 <- read.delim(file = "/home/user1/Desktop/Root files/newstop2.txt", sep = ",")
 
 pre5_rmv <- pre5 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
