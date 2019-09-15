@@ -18,6 +18,7 @@ library(gridExtra)
 library(dplyr)
 library(caret)
 library(xgboost)
+library(h2o)
 ```
 
 This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
@@ -45,10 +46,7 @@ topData_rmv <- topData_rmv %>%
   ) %>%
   select(-grep(pattern="^Electron|^Muon",colnames(topData_rmv)))
 
-
-# Combine the stop and top data for a complete set
-Data_benchmark01 <- rbind.data.frame(stopbm1_rmv, topData_rmv)
-Data_benchmark01 <- Data_benchmark01[sample(nrow(Data_benchmark01)),]
+topData_rmv <- topData_rmv[-seq(230001,nrow(topData_rmv), by = 1)]
 ```
 
 1) Stop benchmark 1 $ \tilde{t}= \text{TeV}, \chi_1^0 = \text{GeV} $.
@@ -74,13 +72,21 @@ stopbm1_rmv <- stopbm1_rmv %>%
   Signal = rep(1,nrow(stopbm1_rmv))
   ) %>%
   select(-grep(pattern="^Electron|^Muon",colnames(stopbm1_rmv)))
+
+stopbm1_rmv <- stopbm1_rmv[-seq(230001,nrow(stopbm1_rmv), by = 1),]
 ```
 
+Combine the data
+- Benchmark01
+```{r}
+# Combine the stop and top data for a complete set
+Data_benchmark01 <- rbind.data.frame(stopbm1_rmv, topData_rmv)
+Data_benchmark01 <- Data_benchmark01[sample(nrow(Data_benchmark01)),]
+```
 
 Using the h2o package, we can can split the data set into training and test sets
 ```{r, message=FALSE}
 # Run AutoML to find the possibly best model for this
-library(h2o)
 h2o.init()
 DD_h2oVer <- as.h2o(Data_benchmark01)
 n_seed <- sample(1:1000000001, 1, replace=T)
@@ -157,9 +163,9 @@ xgb_ts <- xgb.DMatrix(data = ts_M, label = ts_lab)
 param <- list(booster = "gbtree", objective = "multi:softmax", num_class = 2)
 
 new_param <- expand.grid(
-  nrounds = seq(from = 100, to = 500, by = 50),
+  nrounds = seq(from = 50, to = 250, by = 50),
   eta = seq(from = 0.1, to = 0.3, by = 0.05),
-  max_depth = 2:8, 
+  max_depth = 4:8, 
   eval_metric = c("merror", "rmse", "mlogloss")
 )
 
@@ -208,4 +214,46 @@ ts_xgbM <- xgb.DMatrix(data = bm01_ts %>% select(-Signal))
 xgbpred <- predict(tr_xgb, ts_xgbM)
 ```
 
+Using the h2o version to see if it doesn't crash...
+```{r}
+h2o.init()
 
+# Partition the given data in order to cross validate later
+set.seed(sample(1:1000000001, 1, replace=T))
+tr_indx <- createDataPartition(Data_benchmark01$Signal, p = 2/3)$Resample1
+true_train <- as.h2o(Data_benchmark01[tr_indx, ])
+true_test <- as.h2o(Data_benchmark01[-tr_indx, ])
+
+set.seed(sample(1:1000000001, 1, replace=T))
+tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
+part_train <- as.h2o(true_train[tr_indx2, ])
+part_test <- as.h2o(true_test[-tr_indx2, ])
+
+
+param <- expand.grid(
+  ntrees = seq(from = 10, to = 100, by = 10),
+  learn_rate = seq(from = 0.1, to = 0.5, by = 0.1),
+  max_depth = 4:8, 
+  stopping_metric = c("mse", "rmse", "logloss", "mae", "rmsle")
+)
+
+
+# Perform xgboost cv
+xgb <- vector("list", NROW(new_param)) 
+for (i in 1:NROW(new_param)){
+ xgb[[i]] <- h2o.xgboost(y = "Signal", 
+                         training_frame = part_train,
+                         validation_frame = part_test,
+                         param[i,],
+                         stopping_rounds = 5,
+                         distribution = "bernoulli",
+                         score_tree_interval = 1,
+                         nfolds = 10,
+                         tree_method = "hist",
+                         grow_policy = "lossguide",
+                         booster = "gbtree",
+                         gamma = 0.0,
+                         )
+}
+
+```
