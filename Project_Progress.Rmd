@@ -19,6 +19,7 @@ library(dplyr)
 library(caret)
 library(xgboost)
 library(h2o)
+rm(list = ls(all.names = TRUE))
 ```
 
 This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
@@ -163,41 +164,54 @@ ts_lab <- part_test$Signal
 xgb_tr <- xgb.DMatrix(data = tr_M, label = tr_lab)
 xgb_ts <- xgb.DMatrix(data = ts_M, label = ts_lab)
 
+tr_test <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_tr, nrounds = 200, max_depth = 6, eval_metric = "merror")
+pred_test <- predict(tr_test, xgb_ts)
+for (i in 1:NROW(pred_test)){
+  if (pred_test[i] < 0.5){
+       pred_test[i] = 0
+     } else {
+       pred_test[i] = 1
+     }
+}
+confusionMatrix(table(pred_test, part_test$Signal))
+```
+
+Find the most optimal parameter
+```{r}
 param <- list(booster = "gbtree", objective = "multi:softmax", num_class = 2)
 
 new_param <- expand.grid(
   nrounds = seq(from = 50, to = 250, by = 50),
-  eta = seq(from = 0.1, to = 0.3, by = 0.05),
+  eta = seq(from = 0.1, to = 0.5, by = 0.1),
   max_depth = 4:8, 
-  eval_metric = c("merror", "rmse", "mlogloss")
+  eval_metric = c("merror")
 )
 
 new_param <- new_param %>%
   mutate(!!! param)
 
+#rm(lepPT_check, ttbarlepPT_check, tr_indx, tr_indx2, Data_benchmark01, stopbm1, stopbm1_rmv, topData, topData_rmv)
 
-# Perform xgboost cv
-xgbcv <- vector("list", NROW(new_param)) 
+# Perform xgboost cv and extract minimum test MSE mean from each xgbcv
+xgbcv_result <- matrix(nrow = NROW(new_param), ncol = 2) 
 for (i in 1:NROW(new_param)){
-  xgbcv[[i]] <- 
+  xgbcv <- 
     xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
            maximize = F)
+  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
+  xgbcv_result[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
 }
 
-# extract minimum test MSE mean from each xgbcv
-xgbcv_result <- vector("numeric", NROW(new_param)) 
-for (i in 1:NROW(new_param)){
-  xgbcv_result[[i]] <- min(xgbcv[[i]]$evaluation_log$test_merror_mean)
-}
 
 #### row/list number of the best xgbcv
-best_xgbcv <- which.min(xgbcv_result)
+best_xgbcv <- which.min(xgbcv_result[,1])
 
 best_param <- new_param[best_xgbcv,]
 
 # train on partitioned set
-tr_test <- xgb.train(params = best_param, data = xgb_tr, nrounds = xgbcv[[best_xgbcv]]$best_iteration)
+tr_test <- xgb.train(params = best_param, data = xgb_tr, nrounds =xgbcv_result[best_xgbcv,2])
 pred_test <- predict(tr_test, xgb_ts)
 confusionMatrix(table(pred_test, part_test$Signal))
 
@@ -224,7 +238,9 @@ Using the h2o version to see if it doesn't crash...
 ```{r}
 h2o.init()
 
+Data_benchmark01["offset"] <- log(Data_benchmark01["Signal"])
 Data_benchmark01[,"Signal"] <- as.factor(Data_benchmark01[,"Signal"])
+
 # Partition the given data in order to cross validate later
 set.seed(sample(1:1000000001, 1, replace=T))
 tr_indx <- createDataPartition(Data_benchmark01$Signal, p = 2/3)$Resample1
@@ -237,7 +253,6 @@ tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
 
 
 true_tr <- as.h2o(true_train, destination_frame = "true_train")
-
 true_ts <- as.h2o(true_test, destination_frame = "true_test")
 part_train <- as.h2o(true_train[tr_indx2, ], destination_frame = "part_train")
 part_test <- as.h2o(true_test[-tr_indx2, ], destination_frame = "part_test")
@@ -250,6 +265,17 @@ param <- expand.grid(
   stopping_metric = c("mse", "rmse", "logloss", "mae", "rmsle")
 )
 
+fold_numbers <- h2o.kfold_column(part_train, nfolds=10)
+fold_numbers2 <- h2o.kfold_column(part_test, nfolds=10)
+
+# rename the column "fold_numbers"
+names(fold_numbers) <- "fold_numbers"
+
+# rename the column "fold_numbers"
+names(fold_numbers2) <- "fold_numbers"
+
+part_train <- h2o.cbind(part_train,fold_numbers)
+part_test <- h2o.cbind(part_test,fold_numbers2)
 
 # Perform xgboost cv
 xgb <- vector("list", NROW(param)) 
@@ -263,7 +289,16 @@ for (i in 1:NROW(param)){
                          stopping_rounds = 5,
                          distribution = "bernoulli",
                          score_tree_interval = 1,
+                         score_each_iteration = TRUE,
                          nfolds = 10,
+                         fold_assignment = "AUTO",
+                         fold_column = "fold_numbers",
+                         ignore_const_cols = TRUE,
+                         offset_column = NULL,
+                         weights_column = NULL,
+                         keep_cross_validation_models = TRUE,
+                         keep_cross_validation_predictions = FALSE,
+                         keep_cross_validation_fold_assignment = FALSE,
                          tree_method = "hist",
                          grow_policy = "lossguide",
                          booster = "gbtree",
