@@ -197,8 +197,8 @@ Find the most optimal parameter
 param <- list(booster = "gbtree", objective = "multi:softmax", num_class = 2)
 
 new_param <- expand.grid(
-  nrounds = seq(from = 50, to = 150, by = 50),
-  eta = seq(from = 0.1, to = 0.3, by = 0.1),
+  nrounds = seq(from = 50, to = 500, by = 50),
+  eta = seq(from = 0.1, to = 0.5, by = 0.1),
   max_depth = 4:8, 
   eval_metric = c("merror")
 )
@@ -210,7 +210,8 @@ new_param <- new_param %>%
 
 # Perform xgboost cv and extract minimum test MSE mean from each xgbcv
 xgbcv_result <- matrix(nrow = NROW(new_param), ncol = 2) 
-for (i in 1:NROW(new_param)){
+
+for (i in 1:NROW(new_param)/5){
   xgbcv <- 
     xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
@@ -220,7 +221,35 @@ for (i in 1:NROW(new_param)){
   rm(xgbcv)
 }
 
+for (i in 2*NROW(new_param)/5:3*NROW(new_param)/5){
+  xgbcv <- 
+    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
+           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
+           maximize = F)
+  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
+  xgbcv_result[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
+}
 
+for (i in 3*NROW(new_param)/5:4*NROW(new_param)/5){
+  xgbcv <- 
+    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
+           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
+           maximize = F)
+  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
+  xgbcv_result[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
+}
+
+for (i in 4*NROW(new_param)/5:NROW(new_param)/5){
+  xgbcv <- 
+    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
+           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
+           maximize = F)
+  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
+  xgbcv_result[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
+}
 #### row/list number of the best xgbcv
 best_xgbcv <- which.min(xgbcv_result[,1])
 
