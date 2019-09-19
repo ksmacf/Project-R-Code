@@ -23,6 +23,7 @@ rm(list = ls(all.names = TRUE))
 ```
 
 This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
+
 1) Stop benchmark 1 $ \tilde{t}= \text{TeV}, \chi_1^0 = \text{GeV} $. 
 ```{r, message = F}
 # Load the data of interest
@@ -167,17 +168,22 @@ check3
 
 
 Build an XGBoost model according to automl (Ensemble methods are not to be considered).
+----Testing with the first benchmark set.
 ```{r}
-# Set parameters etc
+# Turn each dataset into a suitable xgb matrix
 tr_M <- model.matrix(~. + 0, data = part_train %>% select(-Signal))
 ts_M <- model.matrix(~. + 0, data = part_test %>% select(-Signal))
-tr_lab <- part_train$Signal
-ts_lab <- part_test$Signal
-xgb_tr <- xgb.DMatrix(data = tr_M, label = tr_lab)
-xgb_ts <- xgb.DMatrix(data = ts_M, label = ts_lab)
+xgb_tr <- xgb.DMatrix(data = tr_M, label = part_train$Signal)
+xgb_ts <- xgb.DMatrix(data = ts_M, label = part_test$Signal)
 
-tr_test <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_tr, nrounds = 200, max_depth = 6, eval_metric = "merror")
-pred_test <- predict(tr_test, xgb_ts)
+bm01_tr <- model.matrix(~. + 0, data = true_train %>% select(-Signal))
+xgb_bm01 <- xgb.DMatrix(data = bm01_tr, label = true_train$Signal)
+bm01_ts <- model.matrix(~. + 0, data = true_test %>% select(-Signal))
+ts_xgbM <- xgb.DMatrix(data = bm01_ts, label = true_test$Signal)
+
+
+tr_test <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm01, nrounds = 200, max_depth = 6, eval_metric = "merror")
+pred_test <- predict(tr_test, ts_xgbM)
 for (i in 1:NROW(pred_test)){
   if (pred_test[i] > 0.9){
        pred_test[i] = 1
@@ -185,7 +191,7 @@ for (i in 1:NROW(pred_test)){
        pred_test[i] = 0
      }
 }
-confusionMatrix(table(pred_test, part_test$Signal))
+confusionMatrix(table(pred_test, true_test$Signal))
 
 # Seems like the objective function doesn't really make a difference.
 ```
@@ -260,10 +266,7 @@ confusionMatrix(table(pred_test, part_test$Signal))
 
 # train on original training set
 bm01_tr <- model.matrix(~. + 0, data = true_train %>% select(-Signal))
-#ts_M <- model.matrix(~. + 0, data = tr_ts %>% select(-outcome))
-
 xgb_bm01 <- xgb.DMatrix(data = bm01_tr, label = true_train$Signal)
-#xgb_ts <- xgb.DMatrix(data = ts_M, label = tr_ts$outcome)
 
 tr_xgb <- xgb.train(params = best_param, 
           data = xgb_bm01, nrounds = xgbcv[[best_xgbcv]]$best_iteration)
@@ -302,14 +305,14 @@ param <- expand.grid(
 # Perform xgboost cv
 xgb_h2o <- vector("list", NROW(param)) 
 for (i in 1:NROW(param)){
- xgb_h2o[[i]] <- h2o.xgboost(y = "Signal",
+ xgb_h2o[[1]] <- h2o.xgboost(y = "Signal",
                          x = 1:40,
-                         training_frame = part_tr,
+                         training_frame = true_tr,
                          validation_frame = part_ts,
                          model_id = "model",
-                         ntrees = param[i,1],
-                         learn_rate = param[i,2],
-                         max_depth = param[i,3],
+                         ntrees = param[1,1],
+                         learn_rate = param[1,2],
+                         max_depth = param[1,3],
                          quiet_mode = TRUE,
                          stopping_rounds = 5,
                          distribution = "bernoulli",
@@ -364,11 +367,13 @@ for (i in 1:NROW(param)){
 }
 
 
-Preds <- as.data.frame(h2o.predict(xgb, part_ts))
+Preds <- as.data.frame(h2o.predict(xgb_h2o[[1]], true_ts))
 
-confusionMatrix(table(Preds$predict, part_test[1:length(Preds$predict),37]))
+confusionMatrix(table(Preds$predict, true_test[1:length(Preds$predict),37]))
 
 ```
+
+This section onwards follows from above, but with the other benchmark 
 
 2) Stop benchmark 2 $ \tilde{t}= 1,225 \text{TeV}, \chi_1^0 = 400 \text{GeV} $. 
 ```{r, message = F}
@@ -391,7 +396,7 @@ topData_rmv <- topData %>%
   filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
 
 # Reduce sample size of stops to match background's (top) sample size
-stopbm2 <- stopbm2 %>% anti_join(stopbm1_rmv[sample(seq(nrow(topData_rmv),nrow(stopbm2_rmv), by = 1)),])
+stopbm2 <- stopbm2 %>% anti_join(stopbm2_rmv[sample(seq(nrow(topData_rmv),nrow(stopbm2_rmv), by = 1)),])
 rm(stopbm2_rmv, topData_rmv)
 
 # Combine the stop and top data for a complete set
@@ -405,50 +410,50 @@ rm(stopbm2, topData)
 # Partition the given data in order to cross validate later
 set.seed(sample(1:1000000001, 1, replace=T))
 tr_indx <- createDataPartition(Data_benchmark02$Signal, p = 2/3)$Resample1
-true_train <- Data_benchmark02[tr_indx, ]
-true_test <- Data_benchmark02[-tr_indx, ]
+true_train2 <- Data_benchmark02[tr_indx, ]
+true_test2 <- Data_benchmark02[-tr_indx, ]
 
 # Remove Electrons and Muons so that we have ONE lepton in each decay
-true_train <- true_train %>% 
+true_train2 <- true_train2 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
   filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
   filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
 #ttbarlepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
 
 # Data wrangling with Leptons
-true_train <- true_train %>%
+true_train2 <- true_train2 %>%
   mutate(
   Lepton.PT = Electron.PT_1 + Muon.PT_1,
   Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
   Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
   Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
   ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_train)))
+  select(-grep(pattern="^Electron|^Muon",colnames(true_train2)))
 
 # Remove Electrons and Muons so that we have ONE lepton in each decay
-true_test <- true_test %>% 
+true_test2 <- true_test2 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
   filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
   filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
 
 # Data wrangling with Leptons
-true_test <- true_test %>%
+true_test2 <- true_test2 %>%
   mutate(
   Lepton.PT = Electron.PT_1 + Muon.PT_1,
   Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
   Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
   Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
   ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_test)))
+  select(-grep(pattern="^Electron|^Muon",colnames(true_test2)))
 
 
 # create a second training-test set pair for cross validation via splitting (0.75) the training set.
 set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
-part_train <- true_train[tr_indx2, ]
-part_test <- true_test[-tr_indx2, ]
+tr_indx2 <- createDataPartition(true_train2$Signal, p = 0.75)$Resample1
+part_train2 <- true_train2[tr_indx2, ]
+part_test2 <- true_test2[-tr_indx2, ]
 ```
 
 
@@ -490,50 +495,101 @@ rm(stopbm3, topData)
 # Partition the given data in order to cross validate later
 set.seed(sample(1:1000000001, 1, replace=T))
 tr_indx <- createDataPartition(Data_benchmark01$Signal, p = 2/3)$Resample1
-true_train <- Data_benchmark03[tr_indx, ]
-true_test <- Data_benchmark03[-tr_indx, ]
+true_train3 <- Data_benchmark03[tr_indx, ]
+true_test3 <- Data_benchmark03[-tr_indx, ]
 
 # Remove Electrons and Muons so that we have ONE lepton in each decay
-true_train <- true_train %>% 
+true_train3 <- true_train3 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
   filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
   filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
 #ttbarlepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
 
 # Data wrangling with Leptons
-true_train <- true_train %>%
+true_train3 <- true_train3 %>%
   mutate(
   Lepton.PT = Electron.PT_1 + Muon.PT_1,
   Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
   Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
   Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
   ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_train)))
+  select(-grep(pattern="^Electron|^Muon",colnames(true_train3)))
 
 # Remove Electrons and Muons so that we have ONE lepton in each decay
-true_test <- true_test %>% 
+true_test3 <- true_test3 %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
   filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
   filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
 
 # Data wrangling with Leptons
-true_test <- true_test %>%
+true_test3 <- true_test3 %>%
   mutate(
   Lepton.PT = Electron.PT_1 + Muon.PT_1,
   Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
   Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
   Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
   ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_test)))
+  select(-grep(pattern="^Electron|^Muon",colnames(true_test3)))
 
 
 
 # create a second training-test set pair for cross validation via splitting (0.75) the training set.
 
 set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
-part_train <- true_train[tr_indx2, ]
-part_test <- true_test[-tr_indx2, ]
+tr_indx2 <- createDataPartition(true_train3$Signal, p = 0.75)$Resample1
+part_train3 <- true_train3[tr_indx2, ]
+part_test3 <- true_test3[-tr_indx2, ]
+```
+
+
+Checking how the classifier from benchmark_01 performs against others.
+```{r}
+# Turn each dataset into a suitable xgb matrix
+tr_M2 <- model.matrix(~. + 0, data = part_train2 %>% select(-Signal))
+ts_M2 <- model.matrix(~. + 0, data = part_test2 %>% select(-Signal))
+xgb_tr2 <- xgb.DMatrix(data = tr_M2, label = part_train2$Signal)
+xgb_ts2 <- xgb.DMatrix(data = ts_M2, label = part_test2$Signal)
+
+bm02_tr <- model.matrix(~. + 0, data = true_train2 %>% select(-Signal))
+xgb_bm02 <- xgb.DMatrix(data = bm02_tr, label = true_train2$Signal)
+bm02_ts <- model.matrix(~. + 0, data = true_test2 %>% select(-Signal))
+ts_xgbM2 <- xgb.DMatrix(data = bm02_ts, label = true_test2$Signal)
+
+tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm02, nrounds = 200, max_depth = 6, eval_metric = "merror")
+pred_test2 <- predict(tr_test2, ts_xgbM2)
+
+#####pred_test2 <- predict(tr_test, ts_xgbM2)
+for (i in 1:NROW(pred_test2)){
+  if (pred_test2[i] > 0.9){
+       pred_test2[i] = 1
+     } else {
+       pred_test2[i] = 0
+     }
+}
+confusionMatrix(table(pred_test2, true_test2$Signal))
+
+tr_M3 <- model.matrix(~. + 0, data = part_train3 %>% select(-Signal))
+ts_M3 <- model.matrix(~. + 0, data = part_test3 %>% select(-Signal))
+xgb_tr3 <- xgb.DMatrix(data = tr_M3, label = part_train3$Signal)
+xgb_ts3 <- xgb.DMatrix(data = ts_M3, label = part_test3$Signal)
+
+bm03_tr <- model.matrix(~. + 0, data = true_train3 %>% select(-Signal))
+xgb_bm03 <- xgb.DMatrix(data = bm03_tr, label = true_train3$Signal)
+bm03_ts <- model.matrix(~. + 0, data = true_test3 %>% select(-Signal))
+ts_xgbM3 <- xgb.DMatrix(data = bm03_ts, label = true_test3$Signal)
+
+tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm03, nrounds = 200, max_depth = 6, eval_metric = "merror")
+pred_test3 <- predict(tr_test3, ts_xgbM3)
+
+#####pred_test3 <- predict(tr_test, ts_xgbM3)
+for (i in 1:NROW(pred_test3)){
+  if (pred_test3[i] > 0.9){
+       pred_test3[i] = 1
+     } else {
+       pred_test3[i] = 0
+     }
+}
+confusionMatrix(table(pred_test3, true_test3$Signal))
 ```
