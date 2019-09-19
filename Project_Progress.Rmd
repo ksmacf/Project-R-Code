@@ -181,10 +181,10 @@ xgb_ts <- xgb.DMatrix(data = ts_M, label = ts_lab)
 tr_test <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_tr, nrounds = 200, max_depth = 6, eval_metric = "merror")
 pred_test <- predict(tr_test, xgb_ts)
 for (i in 1:NROW(pred_test)){
-  if (pred_test[i] < 0.5){
-       pred_test[i] = 0
-     } else {
+  if (pred_test[i] > 0.9){
        pred_test[i] = 1
+     } else {
+       pred_test[i] = 0
      }
 }
 confusionMatrix(table(pred_test, part_test$Signal))
@@ -283,61 +283,44 @@ Using the h2o version to see if it doesn't crash...
 ```{r}
 h2o.init()
 
-Data_benchmark01["offset"] <- log(Data_benchmark01["Signal"])
-Data_benchmark01[,"Signal"] <- as.factor(Data_benchmark01[,"Signal"])
+true_train[,"Signal"] <- as.factor(true_train[,"Signal"])
+true_test[,"Signal"] <- as.factor(true_test[,"Signal"])
+part_train[,"Signal"] <- as.factor(part_train[,"Signal"])
+part_test[,"Signal"] <- as.factor(part_test[,"Signal"])
 
-# Partition the given data in order to cross validate later
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx <- createDataPartition(Data_benchmark01$Signal, p = 2/3)$Resample1
-true_train <- Data_benchmark01[tr_indx, ]
-true_test <- Data_benchmark01[-tr_indx, ]
-
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
-
-
-
-true_tr <- as.h2o(true_train, destination_frame = "true_train")
+true_tr <- as.h2o(true_train, destination_frame = "true_train") 
 true_ts <- as.h2o(true_test, destination_frame = "true_test")
-part_train <- as.h2o(true_train[tr_indx2, ], destination_frame = "part_train")
-part_test <- as.h2o(true_test[-tr_indx2, ], destination_frame = "part_test")
+part_tr <- as.h2o(true_train[tr_indx2, ], destination_frame = "part_train")
+part_ts <- as.h2o(true_test[-tr_indx2, ], destination_frame = "part_test")
 
 
 param <- expand.grid(
   ntrees = seq(from = 40, to = 80, by = 10),
   learn_rate = seq(from = 0.1, to = 0.5, by = 0.1),
-  max_depth = 4:8, 
-  stopping_metric = c("mse", "rmse", "logloss", "mae", "rmsle")
+  max_depth = 4:8
 )
 
-fold_numbers <- h2o.kfold_column(part_train, nfolds=10)
-fold_numbers2 <- h2o.kfold_column(part_test, nfolds=10)
-
-# rename the column "fold_numbers"
-names(fold_numbers) <- "fold_numbers"
-
-# rename the column "fold_numbers"
-names(fold_numbers2) <- "fold_numbers"
-
-part_train <- h2o.cbind(part_train,fold_numbers)
-part_test <- h2o.cbind(part_test,fold_numbers2)
 
 # Perform xgboost cv
-xgb <- vector("list", NROW(param)) 
+xgb_h2o <- vector("list", NROW(param)) 
 for (i in 1:NROW(param)){
- xgb[[i]] <- h2o.xgboost(y = "Signal",
+ xgb_h2o[[i]] <- h2o.xgboost(y = "Signal",
                          x = 1:40,
-                         training_frame = part_train,
-                         validation_frame = part_test,
+                         training_frame = part_tr,
+                         validation_frame = part_ts,
                          model_id = "model",
-                         param[i,],
+                         ntrees = param[i,1],
+                         learn_rate = param[i,2],
+                         max_depth = param[i,3],
+                         quiet_mode = TRUE,
                          stopping_rounds = 5,
                          distribution = "bernoulli",
                          score_tree_interval = 1,
                          score_each_iteration = TRUE,
                          nfolds = 10,
+                         stopping_metric = "logloss",
                          fold_assignment = "AUTO",
-                         fold_column = "fold_numbers",
+                         fold_column = NULL,
                          ignore_const_cols = TRUE,
                          offset_column = NULL,
                          weights_column = NULL,
@@ -347,11 +330,44 @@ for (i in 1:NROW(param)){
                          tree_method = "hist",
                          grow_policy = "lossguide",
                          booster = "gbtree",
-                         gamma = 0.0,
+                         stopping_tolerance = 0.001, 
+                         max_runtime_secs = 0, 
+                         seed = -1,
+                         export_checkpoints_dir = NULL,
+                         min_rows = 1, 
+                         min_child_weight = 1,
+                         sample_rate = 1, 
+                         subsample = 1, 
+                         col_sample_rate = 1,
+                         colsample_bylevel = 1, 
+                         col_sample_rate_per_tree = 1,
+                         colsample_bytree = 1, 
+                         max_abs_leafnode_pred = 0,
+                         max_delta_step = 0, 
+                         monotone_constraints = NULL, 
+                         min_split_improvement = 0, gamma = 0, 
+                         nthread = -1, 
+                         max_bins = 256, 
+                         max_leaves = 0,  
+                         min_sum_hessian_in_leaf = 100, 
+                         min_data_in_leaf = 0,
+                         rate_drop = 0, 
+                         one_drop = FALSE, 
+                         skip_drop = 0,
+                         reg_lambda = 1, 
+                         reg_alpha = 0,
+                         dmatrix_type = "auto", 
+                         backend = "auto",
+                         gpu_id = 0, 
+                         verbose = FALSE,
+                         tweedie_power = 1.5,
+                         categorical_encoding = "AUTO"
                          )
 }
 
 
-#Preds <- h2o.predict(xgb, true_test)
+Preds <- as.data.frame(h2o.predict(xgb, part_ts))
+
+confusionMatrix(table(Preds$predict, part_test[1:length(Preds$predict),37]))
 
 ```
