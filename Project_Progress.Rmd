@@ -24,7 +24,7 @@ rm(list = ls(all.names = TRUE))
 
 This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
 1) Stop benchmark 1 $ \tilde{t}= \text{TeV}, \chi_1^0 = \text{GeV} $. 
-```{r}
+```{r, message = F}
 # Load the data of interest
 topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbar1m.txt", sep = ",") 
 topData$Signal <-rep(0,nrow(topData))
@@ -97,10 +97,8 @@ true_test <- true_test %>%
   ) %>%
   select(-grep(pattern="^Electron|^Muon",colnames(true_test)))
 
-```
+# create a second training-test set pair for cross validation via splitting (0.75) the training set.
 
-create a second training-test set pair for cross validation via splitting (0.75) the training set.
-```{r}
 set.seed(sample(1:1000000001, 1, replace=T))
 tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
 part_train <- true_train[tr_indx2, ]
@@ -370,4 +368,172 @@ Preds <- as.data.frame(h2o.predict(xgb, part_ts))
 
 confusionMatrix(table(Preds$predict, part_test[1:length(Preds$predict),37]))
 
+```
+
+2) Stop benchmark 2 $ \tilde{t}= 1,225 \text{TeV}, \chi_1^0 = 400 \text{GeV} $. 
+```{r, message = F}
+# Load the data of interest
+topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbar1m.txt", sep = ",") 
+topData$Signal <-rep(0,nrow(topData))
+stopbm2 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_02.txt", sep = ",") 
+stopbm2$Signal <-  rep(1,nrow(stopbm2))
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+stopbm2_rmv <- stopbm2 %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+topData_rmv <- topData %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+
+# Reduce sample size of stops to match background's (top) sample size
+stopbm2 <- stopbm2 %>% anti_join(stopbm1_rmv[sample(seq(nrow(topData_rmv),nrow(stopbm2_rmv), by = 1)),])
+rm(stopbm2_rmv, topData_rmv)
+
+# Combine the stop and top data for a complete set
+Data_benchmark02 <- rbind.data.frame(stopbm2, topData)
+Data_benchmark02 <- Data_benchmark02[sample(nrow(Data_benchmark02)),]
+## Free up some space
+rm(stopbm2, topData)
+
+# Split to true training and test set for classification, including the pre-selection criteria (this is met with the delphes card and by choosing ONE lepton and ONLY ONE lepton for the event).
+
+# Partition the given data in order to cross validate later
+set.seed(sample(1:1000000001, 1, replace=T))
+tr_indx <- createDataPartition(Data_benchmark02$Signal, p = 2/3)$Resample1
+true_train <- Data_benchmark02[tr_indx, ]
+true_test <- Data_benchmark02[-tr_indx, ]
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+true_train <- true_train %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+#ttbarlepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
+
+# Data wrangling with Leptons
+true_train <- true_train %>%
+  mutate(
+  Lepton.PT = Electron.PT_1 + Muon.PT_1,
+  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(true_train)))
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+true_test <- true_test %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+
+# Data wrangling with Leptons
+true_test <- true_test %>%
+  mutate(
+  Lepton.PT = Electron.PT_1 + Muon.PT_1,
+  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(true_test)))
+
+
+# create a second training-test set pair for cross validation via splitting (0.75) the training set.
+set.seed(sample(1:1000000001, 1, replace=T))
+tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
+part_train <- true_train[tr_indx2, ]
+part_test <- true_test[-tr_indx2, ]
+```
+
+
+
+
+3) Stop benchmark 3 $ \tilde{t}= 1.25 \text{TeV}, \chi_1^0 = 100 \text{GeV} $. 
+```{r, message = F}
+# Load the data of interest
+topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbar1m.txt", sep = ",") 
+topData$Signal <-rep(0,nrow(topData))
+stopbm3 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_03.txt", sep = ",") 
+stopbm3$Signal <-  rep(1,nrow(stopbm3))
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+stopbm3_rmv <- stopbm3 %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+topData_rmv <- topData %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+
+# Reduce sample size of stops to match background's (top) sample size
+stopbm3 <- stopbm3 %>% anti_join(stopbm3_rmv[sample(seq(nrow(topData_rmv),nrow(stopbm3_rmv), by = 1)),])
+rm(stopbm3_rmv, topData_rmv)
+
+# Combine the stop and top data for a complete set
+Data_benchmark03 <- rbind.data.frame(stopbm3, topData)
+Data_benchmark03 <- Data_benchmark03[sample(nrow(Data_benchmark03)),]
+## Free up some space
+rm(stopbm3, topData)
+
+
+# Split to true training and test set for classification, including the pre-selection criteria (this is met with the delphes card and by choosing ONE lepton and ONLY ONE lepton for the event).
+
+# Partition the given data in order to cross validate later
+set.seed(sample(1:1000000001, 1, replace=T))
+tr_indx <- createDataPartition(Data_benchmark01$Signal, p = 2/3)$Resample1
+true_train <- Data_benchmark03[tr_indx, ]
+true_test <- Data_benchmark03[-tr_indx, ]
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+true_train <- true_train %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+#ttbarlepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
+
+# Data wrangling with Leptons
+true_train <- true_train %>%
+  mutate(
+  Lepton.PT = Electron.PT_1 + Muon.PT_1,
+  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(true_train)))
+
+# Remove Electrons and Muons so that we have ONE lepton in each decay
+true_test <- true_test %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+
+# Data wrangling with Leptons
+true_test <- true_test %>%
+  mutate(
+  Lepton.PT = Electron.PT_1 + Muon.PT_1,
+  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(true_test)))
+
+
+
+# create a second training-test set pair for cross validation via splitting (0.75) the training set.
+
+set.seed(sample(1:1000000001, 1, replace=T))
+tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
+part_train <- true_train[tr_indx2, ]
+part_test <- true_test[-tr_indx2, ]
 ```
