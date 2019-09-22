@@ -19,6 +19,8 @@ library(dplyr)
 library(caret)
 library(xgboost)
 library(h2o)
+library(pROC)
+library(ROCit)
 rm(list = ls(all.names = TRUE))
 ```
 
@@ -204,7 +206,7 @@ new_param <- expand.grid(
   nrounds = seq(from = 50, to = 500, by = 50),
   eta = seq(from = 0.1, to = 0.5, by = 0.1),
   max_depth = 4:8, 
-  eval_metric = c("merror")
+  eval_metric = "merror"
 )
 
 new_param <- new_param %>%
@@ -215,7 +217,7 @@ new_param <- new_param %>%
 # Perform xgboost cv and extract minimum test MSE mean from each xgbcv
 xgbcv_result <- matrix(nrow = NROW(new_param), ncol = 2) 
 
-for (i in 1:NROW(new_param)/5){
+for (i in 1:(NROW(new_param)/5)){
   xgbcv <- 
     xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
@@ -225,7 +227,16 @@ for (i in 1:NROW(new_param)/5){
   rm(xgbcv)
 }
 
-for (i in 2*NROW(new_param)/5:3*NROW(new_param)/5){
+for (i in (NROW(new_param)/5):(2*NROW(new_param)/5)){
+  xgbcv <- 
+    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
+           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
+           maximize = F)
+  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
+  xgbcv_result[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
+}
+for (i in (2*NROW(new_param)/5):(3*NROW(new_param)/5)){
   xgbcv <- 
     xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
@@ -235,7 +246,7 @@ for (i in 2*NROW(new_param)/5:3*NROW(new_param)/5){
   rm(xgbcv)
 }
 
-for (i in 3*NROW(new_param)/5:4*NROW(new_param)/5){
+for (i in (3*NROW(new_param)/5):(4*NROW(new_param)/5)){
   xgbcv <- 
     xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
@@ -245,7 +256,7 @@ for (i in 3*NROW(new_param)/5:4*NROW(new_param)/5){
   rm(xgbcv)
 }
 
-for (i in 4*NROW(new_param)/5:NROW(new_param)/5){
+for (i in (4*NROW(new_param))/5:NROW(new_param)){
   xgbcv <- 
     xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
@@ -293,33 +304,48 @@ true_tr <- as.h2o(true_train, destination_frame = "true_train")
 true_ts <- as.h2o(true_test, destination_frame = "true_test")
 part_tr <- as.h2o(true_train[tr_indx2, ], destination_frame = "part_train")
 part_ts <- as.h2o(true_test[-tr_indx2, ], destination_frame = "part_test")
+  
 
-
-param <- expand.grid(
-  ntrees = seq(from = 40, to = 80, by = 10),
-  learn_rate = seq(from = 0.1, to = 0.5, by = 0.1),
-  max_depth = 4:8
+h2o.xgb_param <- list(
+  ntrees = seq(from = 100, to = 500, by = 100),
+  learn_rate = seq(from = 0.2, to = 0.6, by = 0.1),
+  max_depth = 4:8,
+  col_sample_rate = c(0.5, 0.75, 1.0),
+  stopping_metric = c("logloss", "mse", "rmse", "rmsle")
 )
 
+grid <- h2o.grid("gbm", 
+                 x = 1:40, 
+                 y = "Signal",
+                 grid_id = "grid",
+                 training_frame = true_tr,
+                 validation_frame = part_ts,
+                 nfolds = 10,
+                 hyper_params = h2o.xgb_param)
+
+grid_results <- h2o.getGrid(grid_id = "grid", sort_by = "auc", decreasing = TRUE)
+best_model <- h2o.getModel(grid_results@model_ids[[1]])
+# A test performace shows that RMSE is the best choice as a stopping metric without any other parameters tuned. 
+# Will  this change when others are tuned?
 
 # Perform xgboost cv
 xgb_h2o <- vector("list", NROW(param)) 
 for (i in 1:NROW(param)){
- xgb_h2o[[1]] <- h2o.xgboost(y = "Signal",
+ xgb_h2o[[i]] <- h2o.xgboost(y = "Signal",
                          x = 1:40,
                          training_frame = true_tr,
                          validation_frame = part_ts,
                          model_id = "model",
-                         ntrees = param[1,1],
-                         learn_rate = param[1,2],
-                         max_depth = param[1,3],
+                         ntrees = param[i,1],
+                         learn_rate = param[i,2],
+                         max_depth = param[i,3],
                          quiet_mode = TRUE,
                          stopping_rounds = 5,
                          distribution = "bernoulli",
                          score_tree_interval = 1,
                          score_each_iteration = TRUE,
                          nfolds = 10,
-                         stopping_metric = "logloss",
+                         stopping_metric = param[i,4],
                          fold_assignment = "AUTO",
                          fold_column = NULL,
                          ignore_const_cols = TRUE,
@@ -592,4 +618,25 @@ for (i in 1:NROW(pred_test3)){
      }
 }
 confusionMatrix(table(pred_test3, true_test3$Signal))
+```
+
+Create ROC curves based on the test models.
+```{r}
+par(pty = "s")
+roc(true_test$Signal, pred_test, 
+    plot = TRUE, smoothed = TRUE, legacy.axes = TRUE, percent = TRUE, 
+    xlab = "False Positive Rate (FPR)", ylab = "True Positive Rate (TPR)", col = "blue3",
+    ci = TRUE, ci.alpha = 0.9, stratified = FALSE,
+    auc = TRUE, grid=TRUE, print.auc=TRUE, print.auc.x = 70, print.auc.y = 55, show.thres=TRUE)
+plot.roc(true_test2$Signal, pred_test2, ci = TRUE, ci.alpha = 0.9,
+         percent = TRUE, print.auc = TRUE, add = TRUE, col = "green4", print.auc.x = 70, print.auc.y = 45)
+plot.roc(true_test3$Signal, pred_test3, ci = TRUE, ci.alpha = 0.9,
+         percent = TRUE, print.auc = TRUE, add = TRUE, col = "darkmagenta", print.auc.x = 70, print.auc.y = 35)
+legend("bottomright", legend=c("Benchmark 1", "Benchmark 2", "Benchmark 3"), col = c("blue3", "green4", "darkmagenta"), pch = 15)
+
+```
+
+```{r}
+bm01ROC <- rocit(score = pred_test, class = true_test$Signal)
+plot(bm01ROC)
 ```
