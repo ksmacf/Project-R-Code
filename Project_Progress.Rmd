@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 
-```{r}
+```{r, message = FALSE}
 # Load necessary libraries
 library(tidyverse)
 library(gridExtra)
@@ -26,19 +26,20 @@ rm(list = ls(all.names = TRUE))
 
 Create functions for repeated processes.
 ```{r}
-filter_leptons <- function(data){
+preselection <- function(data){
   data_rmv <- data %>% 
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
   filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) %>% # Select zero values in second order PTs
+  filter(MissingET.MET < 250) # Select events with MET >250 GeV
   return(data_rmv)
 }
 
 make_data <- function(data1, data2){ # always put stops in first slot, tops in second slot.
   # Reduce sample size of stops to match background's (top) sample size
-  data1_rmv = filter_leptons(data1)
-  data2_rmv = filter_leptons(data2)
-  data1 = data1 %>% anti_join(data1_rmv[sample(seq(nrow(data2_rmv),nrow(data1_rmv), by = 1)),])
+  data1_rmv = preselection(data1)
+  data2_rmv = preselection(data2)
+  data1 = data1 %>% anti_join(data1_rmv[sample(seq(nrow(data2_rmv),nrow(data1_rmv))),])
   # Combine the stop and top data for a complete set
   Data = rbind.data.frame(data1, data2)
   Data = Data[sample(nrow(Data)),]
@@ -46,7 +47,7 @@ make_data <- function(data1, data2){ # always put stops in first slot, tops in s
 }
 
 data_wrangling <- function(data){
-  data = filter_leptons(data)
+  data = preselection(data)
   data = data %>%
   mutate(
   Lepton.PT = Electron.PT_1 + Muon.PT_1,
@@ -470,20 +471,21 @@ confusionMatrix(table(pred_test3, true_split3[[2]]$Signal))
 Create ROC curves based on the test models.
 ```{r}
 par(pty = "s")
-roc(true_test$Signal, pred_test, 
+roc(true_split1[[2]]$Signal, pred_test, 
     plot = TRUE, smoothed = TRUE, legacy.axes = TRUE, percent = TRUE, 
     xlab = "False Positive Rate (FPR)", ylab = "True Positive Rate (TPR)", col = "blue3",
     ci = TRUE, ci.alpha = 0.9, stratified = FALSE,
     auc = TRUE, grid=TRUE, print.auc=TRUE, print.auc.x = 70, print.auc.y = 55, show.thres=TRUE)
-plot.roc(true_test2$Signal, pred_test2, ci = TRUE, ci.alpha = 0.9,
+plot.roc(true_split2[[2]]$Signal, pred_test2, ci = TRUE, ci.alpha = 0.9,
          percent = TRUE, print.auc = TRUE, add = TRUE, col = "green4", print.auc.x = 70, print.auc.y = 45)
-plot.roc(true_test3$Signal, pred_test3, ci = TRUE, ci.alpha = 0.9,
+plot.roc(true_split3[[3]]$Signal, pred_test3, ci = TRUE, ci.alpha = 0.9,
          percent = TRUE, print.auc = TRUE, add = TRUE, col = "darkmagenta", print.auc.x = 70, print.auc.y = 35)
 legend("bottomright", legend=c("Benchmark 1", "Benchmark 2", "Benchmark 3"), col = c("blue3", "green4", "darkmagenta"), pch = 15)
 
 ```
 
 ```{r}
-bm01ROC <- rocit(score = pred_test, class = true_test$Signal)
-plot(bm01ROC)
+xgb.ggplot.importance(xgb.importance(model = tr_test))
+xgb.ggplot.importance(xgb.importance(model = tr_test2))
+xgb.ggplot.importance(xgb.importance(model = tr_test3))
 ```
