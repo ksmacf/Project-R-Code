@@ -37,13 +37,9 @@ preselection <- function(data){
   filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
   filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
   filter(Muon.PT_2 == 0, Electron.PT_2 == 0) %>% # Select zero values in second order PTs
-<<<<<<< HEAD
   filter(MissingET.MET > 250) %>% # Select events with MET >250 GeV
   filter(Jet.BTag_1 != "0" | Jet.BTag_2 != "0" | 
          Jet.BTag_3 != "0" | Jet.BTag_4 != "0") # Get rid of events that have no b-tagged jets
-=======
-  filter(MissingET.MET < 250) # Select events with MET >250 GeV
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
   return(data_rmv)
 }
 
@@ -51,34 +47,13 @@ make_data <- function(data1, data2){ # always put stops in first slot, tops in s
   # Reduce sample size of stops to match background's (top) sample size
   data1_rmv = preselection(data1)
   data2_rmv = preselection(data2)
-<<<<<<< HEAD
   data1 = data1 %>% anti_join(data1_rmv[sample(seq(nrow(data2_rmv),nrow(data1_rmv), by = 1)),])
-=======
-  data1 = data1 %>% anti_join(data1_rmv[sample(seq(nrow(data2_rmv),nrow(data1_rmv))),])
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
   # Combine the stop and top data for a complete set
   Data = rbind.data.frame(data1, data2)
   Data = Data[sample(nrow(Data)),]
   return(Data)
 }
 
-<<<<<<< HEAD
-=======
-data_wrangling <- function(data){
-  data = preselection(data)
-  data = data %>%
-  mutate(
-  Lepton.PT = Electron.PT_1 + Muon.PT_1,
-  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
-  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
-  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)) # 2 for Muons
-  ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(data)))
-  return(data)
-}
-
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
 true_partition <- function(data){
   # Partition the given data in order to cross validate later
   split_set = vector("list",2)
@@ -123,7 +98,6 @@ xgb_data <- function(true, part){
   
   return(xgb_list)
 }
-<<<<<<< HEAD
 
 
 data_wrangling <- function(data){
@@ -296,8 +270,6 @@ Values <- function(pred, true, data, stopCS){ # data1 = predicted, data2 = true,
   
   return(Vals)
 }
-=======
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
 ```
 
 
@@ -327,11 +299,7 @@ stopbm2 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_02.txt", 
 stopbm2$Signal <-  rep(1,nrow(stopbm2))
 
 Data_Benchmark02 <- make_data(stopbm2, topData)
-<<<<<<< HEAD
 true_split2 <- true_partition(Data_Benchmark02)
-=======
-true_split2 <- true_partition(Data_Benchmark01)
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
 part_split2 <- part_partition(true_split2[[1]])
 rm(stopbm2)
 ```
@@ -346,11 +314,7 @@ stopbm3$Signal <-  rep(1,nrow(stopbm3))
 Data_Benchmark03 <- make_data(stopbm3, topData)
 true_split3 <- true_partition(Data_Benchmark03)
 part_split3 <- part_partition(true_split3[[1]])
-<<<<<<< HEAD
 rm(stopbm3)
-=======
-rm(stopbm3, topData)
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
 ```
 
 
@@ -417,7 +381,6 @@ Build an XGBoost model according to automl (Ensemble methods are not to be consi
 ```{r}
 xgb_bm1 <- xgb_data(true_split1, part_split1)
 # 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
-<<<<<<< HEAD
 
 tr_test1 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
 
@@ -434,19 +397,10 @@ ggplot(check_data1, aes(x = Signal_pred, fill = Signal)) +
 for (i in 1:NROW(pred_test1)){
   if (pred_test1[i] > 0.6){
        pred_test1[i] = 1
-=======
-
-tr_test <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
-pred_test <- predict(tr_test, xgb_bm1[[2]])
-for (i in 1:NROW(pred_test)){
-  if (pred_test[i] > 0.9){
-       pred_test[i] = 1
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
      } else {
        pred_test1[i] = 0
      }
 }
-<<<<<<< HEAD
 confusionMatrix(table(pred_test1, true_split1[[2]]$Signal))
 b1_vals <- Values(pred_test1, true_split1, Data_Benchmark01, 0.1593)
 b1_vals
@@ -461,9 +415,6 @@ t1 <- save_history(select(var1, -"Signal"), guided_tour(ashapetour(cl = col1, al
 X11()
   animate_xy(select(var1, -"Signal"), guided_tour(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red"))), col = col1, axes="bottomleft")
 X11()
-=======
-confusionMatrix(table(pred_test, true_split1[[2]]$Signal))
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
 
 # Save the tour plot
 render(select(var1, -"Signal"), planned_tour(t1), display_xy(col = col1), "png", "/home/user1/Documents/Project/Created Figures/alpha.png")
@@ -670,7 +621,6 @@ confusionMatrix(table(Preds$predict, true_test[1:length(Preds$predict),37]))
 
 This section onwards follows from above, but with the other benchmark 
 
-<<<<<<< HEAD
 Checking how other benchmarks' classifier perform.
 ```{r}
 xgb_bm2 <- xgb_data(true_split2, part_split2)
@@ -872,75 +822,21 @@ ggplot(data, aes(x = Signal_pred, fill = Signal)) +
 for (i in 1:NROW(pred_test_check)){
   if (pred_test_check[i] > 0.8){
        pred_test_check[i] = 1
-=======
-
-
-Checking how the classifier from benchmark_01 performs against others.
-```{r}
-xgb_bm2 <- xgb_data(true_split2, part_split2)
-# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
-
-tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm2[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
-pred_test2 <- predict(tr_test2, xgb_bm2[[2]])
-for (i in 1:NROW(pred_test2)){
-  if (pred_test2[i] > 0.9){
-       pred_test2[i] = 1
-     } else {
-       pred_test2[i] = 0
-     }
-}
-confusionMatrix(table(pred_test2, true_split2[[2]]$Signal))
-
-xgb_bm3 <- xgb_data(true_split3, part_split3)
-# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
-
-tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
-pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
-for (i in 1:NROW(pred_test3)){
-  if (pred_test3[i] > 0.9){
-       pred_test3[i] = 1
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
      } else {
        pred_test_check[i] = 0
      }
 }
-<<<<<<< HEAD
 
       
 confusionMatrix(table(pred_test_check, true_split_check[[2]]$Signal))
 
 vals_check <- Values(pred_test_check, true_split_check, Data_check, 0.579584)
-=======
-confusionMatrix(table(pred_test3, true_split3[[2]]$Signal))
-```
-
-Create ROC curves based on the test models.
-```{r}
-par(pty = "s")
-roc(true_split1[[2]]$Signal, pred_test, 
-    plot = TRUE, smoothed = TRUE, legacy.axes = TRUE, percent = TRUE, 
-    xlab = "False Positive Rate (FPR)", ylab = "True Positive Rate (TPR)", col = "blue3",
-    ci = TRUE, ci.alpha = 0.9, stratified = FALSE,
-    auc = TRUE, grid=TRUE, print.auc=TRUE, print.auc.x = 70, print.auc.y = 55, show.thres=TRUE)
-plot.roc(true_split2[[2]]$Signal, pred_test2, ci = TRUE, ci.alpha = 0.9,
-         percent = TRUE, print.auc = TRUE, add = TRUE, col = "green4", print.auc.x = 70, print.auc.y = 45)
-plot.roc(true_split3[[3]]$Signal, pred_test3, ci = TRUE, ci.alpha = 0.9,
-         percent = TRUE, print.auc = TRUE, add = TRUE, col = "darkmagenta", print.auc.x = 70, print.auc.y = 35)
-legend("bottomright", legend=c("Benchmark 1", "Benchmark 2", "Benchmark 3"), col = c("blue3", "green4", "darkmagenta"), pch = 15)
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
 
 ```
 
 
 ```{r}
-<<<<<<< HEAD
 test <- concaveman(as.matrix(var1))
 plot(var1)
 plot(test, add = TRUE)
 ```
-=======
-xgb.ggplot.importance(xgb.importance(model = tr_test))
-xgb.ggplot.importance(xgb.importance(model = tr_test2))
-xgb.ggplot.importance(xgb.importance(model = tr_test3))
-```
->>>>>>> 26b35f8055bd423430624744b2cdb8a0b01983c9
