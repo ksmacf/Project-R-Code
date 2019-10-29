@@ -11,9 +11,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 
-```{r}
+```{r, message = FALSE}
 # Load necessary libraries
 library(tidyverse)
+library(latex2exp)
 library(gridExtra)
 library(dplyr)
 library(caret)
@@ -21,91 +22,299 @@ library(xgboost)
 library(h2o)
 library(pROC)
 library(ROCit)
+library(tourr)
+library(V8)
+library(sf)
+library(concaveman)
+library(purrr)
 rm(list = ls(all.names = TRUE))
 ```
+
+Create functions for repeated processes.
+```{r}
+preselection <- function(data){
+  data_rmv <- data %>% 
+  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
+  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
+  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) %>% # Select zero values in second order PTs
+  filter(MissingET.MET > 250) %>% # Select events with MET >250 GeV
+  filter(Jet.BTag_1 != "0" | Jet.BTag_2 != "0" | 
+         Jet.BTag_3 != "0" | Jet.BTag_4 != "0") # Get rid of events that have no b-tagged jets
+  return(data_rmv)
+}
+
+make_data <- function(data1, data2){ # always put stops in first slot, tops in second slot.
+  # Reduce sample size of stops to match background's (top) sample size
+  data1_rmv = preselection(data1)
+  data2_rmv = preselection(data2)
+  data1 = data1 %>% anti_join(data1_rmv[sample(seq(nrow(data2_rmv),nrow(data1_rmv), by = 1)),])
+  # Combine the stop and top data for a complete set
+  Data = rbind.data.frame(data1, data2)
+  Data = Data[sample(nrow(Data)),]
+  return(Data)
+}
+
+true_partition <- function(data){
+  # Partition the given data in order to cross validate later
+  split_set = vector("list",2)
+  set.seed(sample(1:1000000001, 1, replace=T))
+  tr_indx = createDataPartition(data$Signal, p = 2/3)$Resample1
+  split_set[[1]] = data[tr_indx, ]
+  split_set[[1]] = data_wrangling(split_set[[1]])
+  split_set[[2]] = data[-tr_indx, ]
+  split_set[[2]] = data_wrangling(split_set[[2]])
+  return(split_set) 
+}
+
+part_partition <- function(data){
+  # create a second training-test set pair for cross validation via splitting (0.75) the training set.
+  split_set = vector("list",2)
+  set.seed(sample(1:1000000001, 1, replace=T))
+  tr_indx = createDataPartition(data$Signal, p = 0.75)$Resample1
+  split_set[[1]] = data[tr_indx, ]
+  split_set[[2]] = data[-tr_indx, ]
+  return(split_set) 
+}
+
+xgb_data <- function(true, part){
+  # Turn each dataset into a suitable xgb matrix
+  xgb_list = vector("list",4)
+
+  # True_split for real model building
+  bm_tr = model.matrix(~. + 0, data = true[[1]] %>% select(-Signal))
+  tr_xgbM = xgb.DMatrix(data = bm_tr, label = true[[1]]$Signal)
+  xgb_list[[1]] = tr_xgbM
+  bm_ts = model.matrix(~. + 0, data = true[[2]] %>% select(-Signal))
+  ts_xgbM = xgb.DMatrix(data = bm_ts, label = true[[2]]$Signal)
+  xgb_list[[2]] = ts_xgbM
+    
+  # Part_split for cross-validation
+  tr_M = model.matrix(~. + 0, data = part[[1]] %>% select(-Signal))
+  xgb_tr = xgb.DMatrix(data = tr_M, label = part[[1]]$Signal)
+  xgb_list[[3]] = xgb_tr
+  ts_M = model.matrix(~. + 0, data = part[[2]] %>% select(-Signal))
+  xgb_ts = xgb.DMatrix(data = ts_M, label = part[[2]]$Signal)
+  xgb_list[[4]] = xgb_ts
+  
+  return(xgb_list)
+}
+
+
+data_wrangling <- function(data){
+  data = preselection(data)
+  data = data %>%
+  mutate(
+    Lepton.PT = Electron.PT_1 + Muon.PT_1,
+    Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
+    Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
+    Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
+    as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)) # 2 for Muons
+  ) %>%
+  select(-grep(pattern="^Electron|^Muon",colnames(data))) %>%
+  # Define b-jets (N=1) and rest as ordinary jets
+  mutate(
+    BJet.PT = vector("numeric", NROW(data$Signal)),
+    BJet.Mass = vector("numeric", NROW(data$Signal)),
+    BJet.Phi = vector("numeric", NROW(data$Signal)),
+    BJet.Eta = vector("numeric", NROW(data$Signal)),
+    BJet.DeltaPhi = vector("numeric", NROW(data$Signal)),
+    BJet.DeltaEta = vector("numeric", NROW(data$Signal)),
+    Jet1.PT = vector("numeric", NROW(data$Signal)),
+    Jet1.Mass = vector("numeric", NROW(data$Signal)),
+    Jet1.Phi = vector("numeric", NROW(data$Signal)),
+    Jet1.Eta = vector("numeric", NROW(data$Signal)),
+    Jet1.DeltaPhi = vector("numeric", NROW(data$Signal)),
+    Jet1.DeltaEta = vector("numeric", NROW(data$Signal)),
+    Jet2.PT = vector("numeric", NROW(data$Signal)),
+    Jet2.Mass = vector("numeric", NROW(data$Signal)),
+    Jet2.Phi = vector("numeric", NROW(data$Signal)),
+    Jet2.Eta = vector("numeric", NROW(data$Signal)),
+    Jet2.DeltaPhi = vector("numeric", NROW(data$Signal)),
+    Jet2.DeltaEta = vector("numeric", NROW(data$Signal)),
+    Jet3.PT = vector("numeric", NROW(data$Signal)),
+    Jet3.Mass = vector("numeric", NROW(data$Signal)),
+    Jet3.Phi = vector("numeric", NROW(data$Signal)),
+    Jet3.Eta = vector("numeric", NROW(data$Signal)),
+    Jet3.DeltaPhi = vector("numeric", NROW(data$Signal)),
+    Jet3.DeltaEta = vector("numeric", NROW(data$Signal))
+  )
+  
+  # Loop through so that the highest b-tagged jets are defined as b-jets, otherwise as regular jets
+  for (i in 1:nrow(data)) {
+    if (data[i,"Jet.BTag_1"] == "1"){
+          data[i,"BJet.PT"] = data[i,"Jet.PT_1"]
+          data[i,"BJet.Mass"] = data[i,"Jet.Mass_1"]
+          data[i,"BJet.Phi"] = data[i,"Jet.Phi_1"]
+          data[i,"BJet.Eta"] = data[i,"Jet.Eta_1"]
+          data[i,"BJet.DeltaPhi"] = data[i,"Jet.DeltaPhi_1"]
+          data[i,"BJet.DeltaEta"] = data[i,"Jet.DeltaEta_1"]
+          data[i,"Jet1.PT"] = data[i,"Jet.PT_2"]
+          data[i,"Jet1.Mass"] = data[i,"Jet.Mass_2"]
+          data[i,"Jet1.Phi"] = data[i,"Jet.Phi_2"]
+          data[i,"Jet1.Eta"] = data[i,"Jet.Eta_2"]
+          data[i,"Jet1.DeltaPhi"] = data[i,"Jet.DeltaPhi_2"]
+          data[i,"Jet1.DeltaEta"] = data[i,"Jet.DeltaEta_2"]
+          data[i,"Jet2.PT"] = data[i,"Jet.PT_3"]
+          data[i,"Jet2.Mass"] = data[i,"Jet.Mass_3"]
+          data[i,"Jet2.Phi"] = data[i,"Jet.Phi_3"]
+          data[i,"Jet2.Eta"] = data[i,"Jet.Eta_3"]
+          data[i,"Jet2.DeltaPhi"] = data[i,"Jet.DeltaPhi_3"]
+          data[i,"Jet2.DeltaEta"] = data[i,"Jet.DeltaEta_3"]
+          data[i,"Jet3.PT"] = data[i,"Jet.PT_4"]
+          data[i,"Jet3.Mass"] = data[i,"Jet.Mass_4"]
+          data[i,"Jet3.Phi"] = data[i,"Jet.Phi_4"]
+          data[i,"Jet3.Eta"] = data[i,"Jet.Eta_4"]
+          data[i,"Jet3.DeltaPhi"] = data[i,"Jet.DeltaPhi_4"]
+          data[i,"Jet3.DeltaEta"] = data[i,"Jet.DeltaEta_4"]      
+    } else if (data[i,"Jet.BTag_2"] == "1"){
+          data[i,"BJet.PT"] = data[i,"Jet.PT_2"]
+          data[i,"BJet.Mass"] = data[i,"Jet.Mass_2"]
+          data[i,"BJet.Phi"] = data[i,"Jet.Phi_2"]
+          data[i,"BJet.Eta"] = data[i,"Jet.Eta_2"]
+          data[i,"BJet.DeltaPhi"] = data[i,"Jet.DeltaPhi_2"]
+          data[i,"BJet.DeltaEta"] = data[i,"Jet.DeltaEta_2"]
+          data[i,"Jet1.PT"] = data[i,"Jet.PT_1"]
+          data[i,"Jet1.Mass"] = data[i,"Jet.Mass_1"]
+          data[i,"Jet1.Phi"] = data[i,"Jet.Phi_1"]
+          data[i,"Jet1.Eta"] = data[i,"Jet.Eta_1"]
+          data[i,"Jet1.DeltaPhi"] = data[i,"Jet.DeltaPhi_1"]
+          data[i,"Jet1.DeltaEta"] = data[i,"Jet.DeltaEta_1"]
+          data[i,"Jet2.PT"] = data[i,"Jet.PT_3"]
+          data[i,"Jet2.Mass"] = data[i,"Jet.Mass_3"]
+          data[i,"Jet2.Phi"] = data[i,"Jet.Phi_3"]
+          data[i,"Jet2.Eta"] = data[i,"Jet.Eta_3"]
+          data[i,"Jet2.DeltaPhi"] = data[i,"Jet.DeltaPhi_3"]
+          data[i,"Jet2.DeltaEta"] = data[i,"Jet.DeltaEta_3"]
+          data[i,"Jet3.PT"] = data[i,"Jet.PT_4"]
+          data[i,"Jet3.Mass"] = data[i,"Jet.Mass_4"]
+          data[i,"Jet3.Phi"] = data[i,"Jet.Phi_4"]
+          data[i,"Jet3.Eta"] = data[i,"Jet.Eta_4"]
+          data[i,"Jet3.DeltaPhi"] = data[i,"Jet.DeltaPhi_4"]
+          data[i,"Jet3.DeltaEta"] = data[i,"Jet.DeltaEta_4"]    
+    } else if (data[i,"Jet.BTag_3"] == "1"){
+          data[i,"BJet.PT"] = data[i,"Jet.PT_3"]
+          data[i,"BJet.Mass"] = data[i,"Jet.Mass_3"]
+          data[i,"BJet.Phi"] = data[i,"Jet.Phi_3"]
+          data[i,"BJet.Eta"] = data[i,"Jet.Eta_3"]
+          data[i,"BJet.DeltaPhi"] = data[i,"Jet.DeltaPhi_3"]
+          data[i,"BJet.DeltaEta"] = data[i,"Jet.DeltaEta_3"]
+          data[i,"Jet1.PT"] = data[i,"Jet.PT_1"]
+          data[i,"Jet1.Mass"] = data[i,"Jet.Mass_1"]
+          data[i,"Jet1.Phi"] = data[i,"Jet.Phi_1"]
+          data[i,"Jet1.Eta"] = data[i,"Jet.Eta_1"]
+          data[i,"Jet1.DeltaPhi"] = data[i,"Jet.DeltaPhi_1"]
+          data[i,"Jet1.DeltaEta"] = data[i,"Jet.DeltaEta_1"]
+          data[i,"Jet2.PT"] = data[i,"Jet.PT_2"]
+          data[i,"Jet2.Mass"] = data[i,"Jet.Mass_2"]
+          data[i,"Jet2.Phi"] = data[i,"Jet.Phi_2"]
+          data[i,"Jet2.Eta"] = data[i,"Jet.Eta_2"]
+          data[i,"Jet2.DeltaPhi"] = data[i,"Jet.DeltaPhi_2"]
+          data[i,"Jet2.DeltaEta"] = data[i,"Jet.DeltaEta_2"]
+          data[i,"Jet3.PT"] = data[i,"Jet.PT_4"]
+          data[i,"Jet3.Mass"] = data[i,"Jet.Mass_4"]
+          data[i,"Jet3.Phi"] = data[i,"Jet.Phi_4"]
+          data[i,"Jet3.Eta"] = data[i,"Jet.Eta_4"]
+          data[i,"Jet3.DeltaPhi"] = data[i,"Jet.DeltaPhi_4"]
+          data[i,"Jet3.DeltaEta"] = data[i,"Jet.DeltaEta_4"]   
+    } else {
+          data[i,"BJet.PT"] = data[i,"Jet.PT_4"]
+          data[i,"BJet.Mass"] = data[i,"Jet.Mass_4"]
+          data[i,"BJet.Phi"] = data[i,"Jet.Phi_4"]
+          data[i,"BJet.Eta"] = data[i,"Jet.Eta_4"]
+          data[i,"BJet.DeltaPhi"] = data[i,"Jet.DeltaPhi_4"]
+          data[i,"BJet.DeltaEta"] = data[i,"Jet.DeltaEta_4"]
+          data[i,"Jet1.PT"] = data[i,"Jet.PT_1"]
+          data[i,"Jet1.Mass"] = data[i,"Jet.Mass_1"]
+          data[i,"Jet1.Phi"] = data[i,"Jet.Phi_1"]
+          data[i,"Jet1.Eta"] = data[i,"Jet.Eta_1"]
+          data[i,"Jet1.DeltaPhi"] = data[i,"Jet.DeltaPhi_1"]
+          data[i,"Jet1.DeltaEta"] = data[i,"Jet.DeltaEta_1"]
+          data[i,"Jet2.PT"] = data[i,"Jet.PT_2"]
+          data[i,"Jet2.Mass"] = data[i,"Jet.Mass_2"]
+          data[i,"Jet2.Phi"] = data[i,"Jet.Phi_2"]
+          data[i,"Jet2.Eta"] = data[i,"Jet.Eta_2"]
+          data[i,"Jet2.DeltaPhi"] = data[i,"Jet.DeltaPhi_2"]
+          data[i,"Jet2.DeltaEta"] = data[i,"Jet.DeltaEta_2"]
+          data[i,"Jet3.PT"] = data[i,"Jet.PT_3"]
+          data[i,"Jet3.Mass"] = data[i,"Jet.Mass_3"]
+          data[i,"Jet3.Phi"] = data[i,"Jet.Phi_3"]
+          data[i,"Jet3.Eta"] = data[i,"Jet.Eta_3"]
+          data[i,"Jet3.DeltaPhi"] = data[i,"Jet.DeltaPhi_3"]
+          data[i,"Jet3.DeltaEta"] = data[i,"Jet.DeltaEta_3"] 
+    }
+  }
+  
+  Jets = !names(data) %in% c("Jet.PT_1", "Jet.PT_2", "Jet.PT_3", "Jet.PT_4", 
+                           "Jet.Mass_1", "Jet.Mass_2", "Jet.Mass_3", "Jet.Mass_4",
+                           "Jet.Phi_1", "Jet.Phi_2", "Jet.Phi_3", "Jet.Phi_4",
+                           "Jet.Eta_1", "Jet.Eta_2", "Jet.Eta_3", "Jet.Eta_4",
+                           "Jet.DeltaPhi_1", "Jet.DeltaPhi_2", "Jet.DeltaPhi_3", "Jet.DeltaPhi_4",
+                           "Jet.DeltaEta_1", "Jet.DeltaEta_2", "Jet.DeltaEta_3", "Jet.DeltaEta_4",
+                           "Jet.BTag_1", "Jet.BTag_2", "Jet.BTag_3", "Jet.BTag_4")
+  data = data[,Jets]
+  return(data)
+}
+
+Values <- function(pred, true, data, stopCS){ # data1 = predicted, data2 = true, data3 = combined data
+  Vals = vector("list",3)
+  
+  confMat = confusionMatrix(table(pred, true[[2]]$Signal))
+  
+  Ns = (stopCS*137)*(3*confMat[["table"]][2,2]/(nrow(data)-1000000))
+  Nb = (2500*137)*(3*confMat[["table"]][1,2]/1000000)
+  AMS = sqrt(2*(Ns+Nb+10)*log(1+(Ns/(Nb+10)))-Ns)
+  
+  Vals[[1]] = Ns
+  Vals[[2]] = Nb
+  Vals[[3]] = AMS
+  
+  return(Vals)
+}
+```
+
+
 
 This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
 
 1) Stop benchmark 1 $ \tilde{t}= \text{TeV}, \chi_1^0 = \text{GeV} $. 
 ```{r, message = F}
 # Load the data of interest
-topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbar1m.txt", sep = ",") 
-topData$Signal <-rep(0,nrow(topData))
+topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbarData_true.txt", sep = ",") 
+topData$Signal <-  rep(0,nrow(topData))
 stopbm1 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_01.txt", sep = ",") 
 stopbm1$Signal <-  rep(1,nrow(stopbm1))
 
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-stopbm1_rmv <- stopbm1 %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+# Split to true training and test set for classification, including the pre-selection criteria (this is met with the delphes card and by choosing ONE lepton and ONLY ONE lepton for the event).
 
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-topData_rmv <- topData %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-
-# Reduce sample size of stops to match background's (top) sample size
-stopbm1 <- stopbm1 %>% anti_join(stopbm1_rmv[sample(seq(nrow(topData_rmv),nrow(stopbm1_rmv), by = 1)),])
-rm(stopbm1_rmv, topData_rmv)
-
-# Combine the stop and top data for a complete set
-Data_benchmark01 <- rbind.data.frame(stopbm1, topData)
-Data_benchmark01 <- Data_benchmark01[sample(nrow(Data_benchmark01)),]
-## Free up some space
-rm(stopbm1, topData)
+Data_Benchmark01 <- make_data(stopbm1, topData)
+true_split1 <- true_partition(Data_Benchmark01)
+part_split1 <- part_partition(true_split1[[1]])
+rm(stopbm1)
 ```
 
-Split to true training and test set for classification, including the pre-selection criteria (this is met with the delphes card and by choosing ONE lepton and ONLY ONE lepton for the event).
-```{r}
-# Partition the given data in order to cross validate later
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx <- createDataPartition(Data_benchmark01$Signal, p = 2/3)$Resample1
-true_train <- Data_benchmark01[tr_indx, ]
-true_test <- Data_benchmark01[-tr_indx, ]
+2) Stop benchmark 2 $ \tilde{t}= 1,225 \text{TeV}, \chi_1^0 = 400 \text{GeV} $. 
+```{r, message = F}
+# Load the data of interest
+stopbm2 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_02.txt", sep = ",") 
+stopbm2$Signal <-  rep(1,nrow(stopbm2))
 
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-true_train <- true_train %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-#ttbarlepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
+Data_Benchmark02 <- make_data(stopbm2, topData)
+true_split2 <- true_partition(Data_Benchmark02)
+part_split2 <- part_partition(true_split2[[1]])
+rm(stopbm2)
+```
 
-# Data wrangling with Leptons
-true_train <- true_train %>%
-  mutate(
-  Lepton.PT = Electron.PT_1 + Muon.PT_1,
-  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
-  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
-  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
-  ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_train)))
 
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-true_test <- true_test %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
+3) Stop benchmark 3 $ \tilde{t}= 1.25 \text{TeV}, \chi_1^0 = 100 \text{GeV} $. 
+```{r, message = F}
+# Load the data of interest
+stopbm3 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_03.txt", sep = ",") 
+stopbm3$Signal <-  rep(1,nrow(stopbm3))
 
-# Data wrangling with Leptons
-true_test <- true_test %>%
-  mutate(
-  Lepton.PT = Electron.PT_1 + Muon.PT_1,
-  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
-  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
-  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-  as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
-  ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_test)))
-
-# create a second training-test set pair for cross validation via splitting (0.75) the training set.
-
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx2 <- createDataPartition(true_train$Signal, p = 0.75)$Resample1
-part_train <- true_train[tr_indx2, ]
-part_test <- true_test[-tr_indx2, ]
+Data_Benchmark03 <- make_data(stopbm3, topData)
+true_split3 <- true_partition(Data_Benchmark03)
+part_split3 <- part_partition(true_split3[[1]])
+rm(stopbm3)
 ```
 
 
@@ -120,8 +329,6 @@ h_train <- h_split[[1]] # 75% for modelling
 h_test <- h_split[[2]]
 features <- setdiff(colnames(Data_benchmark01), "Signal")
 ```
-
-
 
 Within the h2o package, there is a function called "h2o.automl" which trains many models in order to obtain the best possible classifier.
 Number 1), with a k-fold cross-validation of k=5 and testing 20 models... 
@@ -172,30 +379,45 @@ check3
 Build an XGBoost model according to automl (Ensemble methods are not to be considered).
 ----Testing with the first benchmark set.
 ```{r}
-# Turn each dataset into a suitable xgb matrix
-tr_M <- model.matrix(~. + 0, data = part_train %>% select(-Signal))
-ts_M <- model.matrix(~. + 0, data = part_test %>% select(-Signal))
-xgb_tr <- xgb.DMatrix(data = tr_M, label = part_train$Signal)
-xgb_ts <- xgb.DMatrix(data = ts_M, label = part_test$Signal)
+xgb_bm1 <- xgb_data(true_split1, part_split1)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
 
-bm01_tr <- model.matrix(~. + 0, data = true_train %>% select(-Signal))
-xgb_bm01 <- xgb.DMatrix(data = bm01_tr, label = true_train$Signal)
-bm01_ts <- model.matrix(~. + 0, data = true_test %>% select(-Signal))
-ts_xgbM <- xgb.DMatrix(data = bm01_ts, label = true_test$Signal)
+tr_test1 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
 
+pred_test1 <- predict(tr_test1, xgb_bm1[[2]])
+check_data1 <- true_split1[[2]] %>% mutate(Signal_pred = pred_test1, Signal = as.factor(Signal))
 
-tr_test <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm01, nrounds = 200, max_depth = 6, eval_metric = "merror")
-pred_test <- predict(tr_test, ts_xgbM)
-for (i in 1:NROW(pred_test)){
-  if (pred_test[i] > 0.9){
-       pred_test[i] = 1
+ggplot(check_data1, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV")) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
+for (i in 1:NROW(pred_test1)){
+  if (pred_test1[i] > 0.6){
+       pred_test1[i] = 1
      } else {
-       pred_test[i] = 0
+       pred_test1[i] = 0
      }
 }
-confusionMatrix(table(pred_test, true_test$Signal))
+confusionMatrix(table(pred_test1, true_split1[[2]]$Signal))
+b1_vals <- Values(pred_test1, true_split1, Data_Benchmark01, 0.1593)
+b1_vals
+```
 
-# Seems like the objective function doesn't really make a difference.
+Visualisation using guided tours
+```{r}
+var1 <- true_split1[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Lepton.Eta", "BJet.Eta", "Signal") %>% sample_n(5000)
+col1 <- if_else(var1$Signal==0, "blue", "red")
+
+t1 <- save_history(select(var1, -"Signal"), guided_tour(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red"))))
+X11()
+  animate_xy(select(var1, -"Signal"), guided_tour(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red"))), col = col1, axes="bottomleft")
+X11()
+
+# Save the tour plot
+render(select(var1, -"Signal"), planned_tour(t1), display_xy(col = col1), "png", "/home/user1/Documents/Project/Created Figures/alpha.png")
 ```
 
 Find the most optimal parameter
@@ -288,30 +510,27 @@ ts_xgbM <- xgb.DMatrix(data = bm01_ts %>% select(-Signal))
 xgbpred <- predict(tr_xgb, ts_xgbM)
 ```
 
-
-
-
 Using the h2o version to see if it doesn't crash...
 ```{r}
 h2o.init()
 
-true_train[,"Signal"] <- as.factor(true_train[,"Signal"])
-true_test[,"Signal"] <- as.factor(true_test[,"Signal"])
-part_train[,"Signal"] <- as.factor(part_train[,"Signal"])
-part_test[,"Signal"] <- as.factor(part_test[,"Signal"])
+true_split1[[1]][,"Signal"] <- as.factor(true_split1[[1]][,"Signal"])
+true_split1[[2]][,"Signal"] <- as.factor(true_split1[[2]][,"Signal"])
+part_split1[[1]][,"Signal"] <- as.factor(part_split1[[1]][,"Signal"])
+part_split1[[2]][,"Signal"] <- as.factor(part_split1[[2]][,"Signal"])
 
-true_tr <- as.h2o(true_train, destination_frame = "true_train") 
-true_ts <- as.h2o(true_test, destination_frame = "true_test")
-part_tr <- as.h2o(true_train[tr_indx2, ], destination_frame = "part_train")
-part_ts <- as.h2o(true_test[-tr_indx2, ], destination_frame = "part_test")
+true_tr <- as.h2o(true_split1[[1]], destination_frame = "true_train") 
+true_ts <- as.h2o(true_split1[[2]], destination_frame = "true_test")
+part_tr <- as.h2o(part_split1[[1]], destination_frame = "part_train")
+part_ts <- as.h2o(part_split1[[2]], destination_frame = "part_test")
   
 
-h2o.xgb_param <- list(
-  ntrees = seq(from = 100, to = 500, by = 100),
-  learn_rate = seq(from = 0.2, to = 0.6, by = 0.1),
-  max_depth = 4:8,
+h2o.xgb_param <- expand.grid(
+  ntrees = seq(from = 400, to = 500, by = 50),
+  max_depth = 5:7,
   col_sample_rate = c(0.5, 0.75, 1.0),
-  stopping_metric = c("logloss", "mse", "rmse", "rmsle")
+  learn_rate = seq(from = 0.2, to = 0.6, by = 0.1),
+  stopping_metric = c("mse", "rmse", "logloss")
 )
 
 grid <- h2o.grid("gbm", 
@@ -321,76 +540,77 @@ grid <- h2o.grid("gbm",
                  training_frame = true_tr,
                  validation_frame = part_ts,
                  nfolds = 10,
+                 distribution = "bernoulli",
                  hyper_params = h2o.xgb_param)
 
-grid_results <- h2o.getGrid(grid_id = "grid", sort_by = "auc", decreasing = TRUE)
+          grid_results <- h2o.getGrid(grid_id = "grid", sort_by = "auc", decreasing = TRUE)
 best_model <- h2o.getModel(grid_results@model_ids[[1]])
-# A test performace shows that RMSE is the best choice as a stopping metric without any other parameters tuned. 
-# Will  this change when others are tuned?
 
+```
+A test performace shows that RMSE is the best choice as a stopping metric without any other parameters tuned. 
+Will  this change when others are tuned?
+Turns out MSE was the better choice this time, so it may go back and forth, but it seems taking the mean squared error itself is most optimal for this problem.
+
+```{r}
 # Perform xgboost cv
-xgb_h2o <- vector("list", NROW(param)) 
-for (i in 1:NROW(param)){
- xgb_h2o[[i]] <- h2o.xgboost(y = "Signal",
-                         x = 1:40,
-                         training_frame = true_tr,
-                         validation_frame = part_ts,
-                         model_id = "model",
-                         ntrees = param[i,1],
-                         learn_rate = param[i,2],
-                         max_depth = param[i,3],
-                         quiet_mode = TRUE,
-                         stopping_rounds = 5,
-                         distribution = "bernoulli",
-                         score_tree_interval = 1,
-                         score_each_iteration = TRUE,
-                         nfolds = 10,
-                         stopping_metric = param[i,4],
-                         fold_assignment = "AUTO",
-                         fold_column = NULL,
-                         ignore_const_cols = TRUE,
-                         offset_column = NULL,
-                         weights_column = NULL,
-                         keep_cross_validation_models = TRUE,
-                         keep_cross_validation_predictions = FALSE,
-                         keep_cross_validation_fold_assignment = FALSE,
-                         tree_method = "hist",
-                         grow_policy = "lossguide",
-                         booster = "gbtree",
-                         stopping_tolerance = 0.001, 
-                         max_runtime_secs = 0, 
-                         seed = -1,
-                         export_checkpoints_dir = NULL,
-                         min_rows = 1, 
-                         min_child_weight = 1,
-                         sample_rate = 1, 
-                         subsample = 1, 
-                         col_sample_rate = 1,
-                         colsample_bylevel = 1, 
-                         col_sample_rate_per_tree = 1,
-                         colsample_bytree = 1, 
-                         max_abs_leafnode_pred = 0,
-                         max_delta_step = 0, 
-                         monotone_constraints = NULL, 
-                         min_split_improvement = 0, gamma = 0, 
-                         nthread = -1, 
-                         max_bins = 256, 
-                         max_leaves = 0,  
-                         min_sum_hessian_in_leaf = 100, 
-                         min_data_in_leaf = 0,
-                         rate_drop = 0, 
-                         one_drop = FALSE, 
-                         skip_drop = 0,
-                         reg_lambda = 1, 
-                         reg_alpha = 0,
-                         dmatrix_type = "auto", 
-                         backend = "auto",
-                         gpu_id = 0, 
-                         verbose = FALSE,
-                         tweedie_power = 1.5,
-                         categorical_encoding = "AUTO"
-                         )
-}
+xgb_h2o <- h2o.xgboost(y = "Signal",
+                       x = best_model@allparameters$x,
+                       training_frame = true_tr,
+                       validation_frame = part_ts,
+                       model_id = "model",
+                       ntrees = best_model@allparameters$ntrees,
+                       learn_rate = best_model@allparameters$learn_rate,
+                       max_depth = best_model@allparameters$max_depth,
+                       quiet_mode = TRUE,
+                       stopping_rounds = 5,
+                       distribution = "bernoulli",
+                       score_tree_interval = 1,
+                       score_each_iteration = TRUE,
+                       nfolds = 10,
+                       stopping_metric = best_model@allparameters$stopping_metric,
+                       fold_assignment = "AUTO",
+                       fold_column = NULL,
+                       ignore_const_cols = TRUE,
+                       offset_column = NULL,
+                       weights_column = NULL,
+                       keep_cross_validation_models = TRUE,
+                       keep_cross_validation_predictions = FALSE,
+                       keep_cross_validation_fold_assignment = FALSE,
+                       tree_method = "hist",
+                       grow_policy = "lossguide",
+                       booster = "gbtree",
+                       stopping_tolerance = best_model@allparameters$stopping_tolerance, 
+                       max_runtime_secs = 0,
+                       export_checkpoints_dir = NULL,
+                       min_rows = 1, 
+                       min_child_weight = 1,
+                       sample_rate = 1, 
+                       subsample = 1, 
+                       col_sample_rate = best_model@allparameters$col_sample_rate,
+                       colsample_bylevel = 1,
+                       col_sample_rate_per_tree = 1,
+                       colsample_bytree = 1, 
+                       max_abs_leafnode_pred = 0,
+                       max_delta_step = 0, 
+                       monotone_constraints = NULL, 
+                       min_split_improvement = best_model@allparameters$min_split_improvement,
+                       nthread = -1, 
+                       max_bins = 256, 
+                       max_leaves = 0,  
+                       min_sum_hessian_in_leaf = 100, 
+                       min_data_in_leaf = 0,
+                       rate_drop = 0, 
+                       one_drop = FALSE, 
+                       skip_drop = 0,
+                       reg_lambda = 1, 
+                       reg_alpha = best_model@allparameters$reg_alpha,
+                       dmatrix_type = "auto", 
+                       backend = "auto",
+                       gpu_id = 0, 
+                       verbose = FALSE,
+                       tweedie_power = 1.5,
+                       categorical_encoding = "AUTO"
+                       )
 
 
 Preds <- as.data.frame(h2o.predict(xgb_h2o[[1]], true_ts))
@@ -401,242 +621,222 @@ confusionMatrix(table(Preds$predict, true_test[1:length(Preds$predict),37]))
 
 This section onwards follows from above, but with the other benchmark 
 
-2) Stop benchmark 2 $ \tilde{t}= 1,225 \text{TeV}, \chi_1^0 = 400 \text{GeV} $. 
-```{r, message = F}
-# Load the data of interest
-topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbar1m.txt", sep = ",") 
-topData$Signal <-rep(0,nrow(topData))
-stopbm2 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_02.txt", sep = ",") 
-stopbm2$Signal <-  rep(1,nrow(stopbm2))
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-stopbm2_rmv <- stopbm2 %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-topData_rmv <- topData %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-
-# Reduce sample size of stops to match background's (top) sample size
-stopbm2 <- stopbm2 %>% anti_join(stopbm2_rmv[sample(seq(nrow(topData_rmv),nrow(stopbm2_rmv), by = 1)),])
-rm(stopbm2_rmv, topData_rmv)
-
-# Combine the stop and top data for a complete set
-Data_benchmark02 <- rbind.data.frame(stopbm2, topData)
-Data_benchmark02 <- Data_benchmark02[sample(nrow(Data_benchmark02)),]
-## Free up some space
-rm(stopbm2, topData)
-
-# Split to true training and test set for classification, including the pre-selection criteria (this is met with the delphes card and by choosing ONE lepton and ONLY ONE lepton for the event).
-
-# Partition the given data in order to cross validate later
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx <- createDataPartition(Data_benchmark02$Signal, p = 2/3)$Resample1
-true_train2 <- Data_benchmark02[tr_indx, ]
-true_test2 <- Data_benchmark02[-tr_indx, ]
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-true_train2 <- true_train2 %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-#ttbarlepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
-
-# Data wrangling with Leptons
-true_train2 <- true_train2 %>%
-  mutate(
-  Lepton.PT = Electron.PT_1 + Muon.PT_1,
-  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
-  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
-  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
-  ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_train2)))
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-true_test2 <- true_test2 %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-
-# Data wrangling with Leptons
-true_test2 <- true_test2 %>%
-  mutate(
-  Lepton.PT = Electron.PT_1 + Muon.PT_1,
-  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
-  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
-  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
-  ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_test2)))
-
-
-# create a second training-test set pair for cross validation via splitting (0.75) the training set.
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx2 <- createDataPartition(true_train2$Signal, p = 0.75)$Resample1
-part_train2 <- true_train2[tr_indx2, ]
-part_test2 <- true_test2[-tr_indx2, ]
-```
-
-
-
-
-3) Stop benchmark 3 $ \tilde{t}= 1.25 \text{TeV}, \chi_1^0 = 100 \text{GeV} $. 
-```{r, message = F}
-# Load the data of interest
-topData <- read.delim(file = "/home/user1/Desktop/Root files/ttbar1m.txt", sep = ",") 
-topData$Signal <-rep(0,nrow(topData))
-stopbm3 <- read.delim(file = "/home/user1/Desktop/Root files/benchmark_03.txt", sep = ",") 
-stopbm3$Signal <-  rep(1,nrow(stopbm3))
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-stopbm3_rmv <- stopbm3 %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-topData_rmv <- topData %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-
-# Reduce sample size of stops to match background's (top) sample size
-stopbm3 <- stopbm3 %>% anti_join(stopbm3_rmv[sample(seq(nrow(topData_rmv),nrow(stopbm3_rmv), by = 1)),])
-rm(stopbm3_rmv, topData_rmv)
-
-# Combine the stop and top data for a complete set
-Data_benchmark03 <- rbind.data.frame(stopbm3, topData)
-Data_benchmark03 <- Data_benchmark03[sample(nrow(Data_benchmark03)),]
-## Free up some space
-rm(stopbm3, topData)
-
-
-# Split to true training and test set for classification, including the pre-selection criteria (this is met with the delphes card and by choosing ONE lepton and ONLY ONE lepton for the event).
-
-# Partition the given data in order to cross validate later
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx <- createDataPartition(Data_benchmark01$Signal, p = 2/3)$Resample1
-true_train3 <- Data_benchmark03[tr_indx, ]
-true_test3 <- Data_benchmark03[-tr_indx, ]
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-true_train3 <- true_train3 %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-#ttbarlepPT_check <- summary(topData_rmv$Electron.PT_1==topData_rmv$Muon.PT_1) # Check if PT1 for E and M are different at each entry
-
-# Data wrangling with Leptons
-true_train3 <- true_train3 %>%
-  mutate(
-  Lepton.PT = Electron.PT_1 + Muon.PT_1,
-  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
-  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
-  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
-  ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_train3)))
-
-# Remove Electrons and Muons so that we have ONE lepton in each decay
-true_test3 <- true_test3 %>% 
-  filter(Muon.PT_1 != "0" | Electron.PT_1 != "0") %>% # select non-zero values
-  filter(Muon.PT_1 == 0 | Electron.PT_1 == 0) %>% # select zero values
-  filter(Muon.PT_2 == 0, Electron.PT_2 == 0) # Select zero values in second order PTs
-
-# Data wrangling with Leptons
-true_test3 <- true_test3 %>%
-  mutate(
-  Lepton.PT = Electron.PT_1 + Muon.PT_1,
-  Lepton.Eta = Electron.Eta_1 + Muon.Eta_1,
-  Lepton.Phi = Electron.Phi_1 + Muon.Phi_1,
-  Lepton.Type = as.numeric(replace(Electron.PT_1, Electron.PT_1 > 0, 1)) + # 1 for Electrons
-                as.numeric(replace(Muon.PT_1, Muon.PT_1 > 0, 2)), # 2 for Muons
-  ) %>%
-  select(-grep(pattern="^Electron|^Muon",colnames(true_test3)))
-
-
-
-# create a second training-test set pair for cross validation via splitting (0.75) the training set.
-
-set.seed(sample(1:1000000001, 1, replace=T))
-tr_indx2 <- createDataPartition(true_train3$Signal, p = 0.75)$Resample1
-part_train3 <- true_train3[tr_indx2, ]
-part_test3 <- true_test3[-tr_indx2, ]
-```
-
-
-Checking how the classifier from benchmark_01 performs against others.
+Checking how other benchmarks' classifier perform.
 ```{r}
-# Turn each dataset into a suitable xgb matrix
-tr_M2 <- model.matrix(~. + 0, data = part_train2 %>% select(-Signal))
-ts_M2 <- model.matrix(~. + 0, data = part_test2 %>% select(-Signal))
-xgb_tr2 <- xgb.DMatrix(data = tr_M2, label = part_train2$Signal)
-xgb_ts2 <- xgb.DMatrix(data = ts_M2, label = part_test2$Signal)
+xgb_bm2 <- xgb_data(true_split2, part_split2)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
 
-bm02_tr <- model.matrix(~. + 0, data = true_train2 %>% select(-Signal))
-xgb_bm02 <- xgb.DMatrix(data = bm02_tr, label = true_train2$Signal)
-bm02_ts <- model.matrix(~. + 0, data = true_test2 %>% select(-Signal))
-ts_xgbM2 <- xgb.DMatrix(data = bm02_ts, label = true_test2$Signal)
+tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm2[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+pred_test2 <- predict(tr_test2, xgb_bm2[[2]])
 
-tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm02, nrounds = 200, max_depth = 6, eval_metric = "merror")
-pred_test2 <- predict(tr_test2, ts_xgbM2)
+check_data2 <- true_split2[[2]] %>% mutate(Signal_pred = pred_test2, Signal = as.factor(Signal))
 
-#####pred_test2 <- predict(tr_test, ts_xgbM2)
+ggplot(check_data2, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV")) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 for (i in 1:NROW(pred_test2)){
-  if (pred_test2[i] > 0.9){
+  if (pred_test2[i] > 0.6){
        pred_test2[i] = 1
      } else {
        pred_test2[i] = 0
      }
 }
-confusionMatrix(table(pred_test2, true_test2$Signal))
+confusionMatrix(table(pred_test2, true_split2[[2]]$Signal))
+b2_vals <- Values(pred_test2, true_split2, Data_Benchmark02, 2.877)
+b2_vals
 
-tr_M3 <- model.matrix(~. + 0, data = part_train3 %>% select(-Signal))
-ts_M3 <- model.matrix(~. + 0, data = part_test3 %>% select(-Signal))
-xgb_tr3 <- xgb.DMatrix(data = tr_M3, label = part_train3$Signal)
-xgb_ts3 <- xgb.DMatrix(data = ts_M3, label = part_test3$Signal)
+######################################################################################################################################
+xgb_bm3 <- xgb_data(true_split3, part_split3)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
 
-bm03_tr <- model.matrix(~. + 0, data = true_train3 %>% select(-Signal))
-xgb_bm03 <- xgb.DMatrix(data = bm03_tr, label = true_train3$Signal)
-bm03_ts <- model.matrix(~. + 0, data = true_test3 %>% select(-Signal))
-ts_xgbM3 <- xgb.DMatrix(data = bm03_ts, label = true_test3$Signal)
+tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
 
-tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm03, nrounds = 200, max_depth = 6, eval_metric = "merror")
-pred_test3 <- predict(tr_test3, ts_xgbM3)
+check_data3 <- true_split3[[2]] %>% mutate(Signal_pred = pred_test3, Signal = as.factor(Signal))
 
-#####pred_test3 <- predict(tr_test, ts_xgbM3)
+ggplot(check_data3, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.25$ TeV and $ \\chi_1^0 = 100 $ GeV")) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 for (i in 1:NROW(pred_test3)){
-  if (pred_test3[i] > 0.9){
+  if (pred_test3[i] > 0.5){
        pred_test3[i] = 1
      } else {
        pred_test3[i] = 0
      }
 }
-confusionMatrix(table(pred_test3, true_test3$Signal))
+confusionMatrix(table(pred_test3, true_split3[[2]]$Signal))
+b3_vals <- Values(pred_test3, true_split3, Data_Benchmark01, 0.6571)
+b3_vals
 ```
+
+Visualization with a guided tour
+```{r}
+var2 <- true_split2[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal") %>% sample_n(5000)
+col2 <- if_else(var2$Signal==0, "blue", "red")
+
+t2 <- save_history(select(var2, -"Signal"), guided_tour(ashapetour(cl = col2, alpha = 0.4, hull_var = c("blue", "red"))))
+X11()
+animate_xy(select(var2, -"Signal"), planned_tour(t2), col = col2, axes="bottomleft")
+X11()
+
+# Save the tour plot
+render(select(var2, -"Signal"), planned_tour(t2), display_xy(col = col2), "png", "/home/user1/Documents/Project/Created Figures/alpha2.png")
+
+
+var3 <- true_split3[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal") %>% sample_n(5000)
+col3 <- if_else(var3$Signal==0, "blue", "red")
+
+t3 <- save_history(select(var3, -"Signal"), guided_tour(ashapetour(cl = col3, alpha = 0.4, hull_var = c("blue", "red"))))
+X11()
+animate_xy(select(var3, -"Signal"), guided_tour(lda_pp(col)), col = col3, axes="bottomleft")
+X11()
+
+# Save the tour plot
+render(select(var3, -"Signal"), guided_tour(ashapetour(cl = col3, alpha = 0.4, hull_var = c("blue", "red"))), display_xy(col = col3), "png", "/home/user1/Documents/Project/Created Figures/alpha3.png")
+```
+
 
 Create ROC curves based on the test models.
 ```{r}
+pred_test <- predict(tr_test, xgb_bm1[[2]])
+pred_test2 <- predict(tr_test2, xgb_bm2[[2]])
+pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
 par(pty = "s")
-roc(true_test$Signal, pred_test, 
+roc(true_split1[[2]]$Signal, pred_test, 
     plot = TRUE, smoothed = TRUE, legacy.axes = TRUE, percent = TRUE, 
     xlab = "False Positive Rate (FPR)", ylab = "True Positive Rate (TPR)", col = "blue3",
     ci = TRUE, ci.alpha = 0.9, stratified = FALSE,
     auc = TRUE, grid=TRUE, print.auc=TRUE, print.auc.x = 70, print.auc.y = 55, show.thres=TRUE)
-plot.roc(true_test2$Signal, pred_test2, ci = TRUE, ci.alpha = 0.9,
+plot.roc(true_split2[[2]]$Signal, pred_test2, ci = TRUE, ci.alpha = 0.9,
          percent = TRUE, print.auc = TRUE, add = TRUE, col = "green4", print.auc.x = 70, print.auc.y = 45)
-plot.roc(true_test3$Signal, pred_test3, ci = TRUE, ci.alpha = 0.9,
+plot.roc(true_split3[[2]]$Signal, pred_test3, ci = TRUE, ci.alpha = 0.9,
          percent = TRUE, print.auc = TRUE, add = TRUE, col = "darkmagenta", print.auc.x = 70, print.auc.y = 35)
 legend("bottomright", legend=c("Benchmark 1", "Benchmark 2", "Benchmark 3"), col = c("blue3", "green4", "darkmagenta"), pch = 15)
 
 ```
 
 ```{r}
-bm01ROC <- rocit(score = pred_test, class = true_test$Signal)
-plot(bm01ROC)
+xgb.ggplot.importance(xgb.importance(model = tr_test))
+xgb.ggplot.importance(xgb.importance(model = tr_test2))
+xgb.ggplot.importance(xgb.importance(model = tr_test3))
+```
+
+
+This is to do a check with masses $ \tilde{t}= 750 \text{GeV}, \chi_1^0 = 1 \text{GeV} $. 
+```{r, message = F}
+# Load the data of interest
+stop <- read.delim(file = "/home/user1/Desktop/Root files/inside_750GeV.txt", sep = ",") 
+stop$Signal <-  rep(1,nrow(stop))
+
+Data_Inside <- make_data(stop, topData)
+true_split_I <- true_partition(Data_Inside)
+part_split_I <- part_partition(true_split_I[[1]])
+rm(stop)
+
+xgb_bm_I <- xgb_data(true_split_I, part_split_I)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
+
+tr_test_I <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm_I[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+pred_test_I <- predict(tr_test_I, xgb_bm_I[[2]])
+for (i in 1:NROW(pred_test_I)){
+  if (pred_test_I[i] > 0.8){
+       pred_test_I[i] = 1
+     } else {
+       pred_test_I[i] = 0
+     }
+}
+      
+confusionMatrix(table(pred_test_I, true_split_I[[2]]$Signal))
+
+```
+
+```{r}
+pred_test_I <- predict(tr_test_I, xgb_bm_I[[2]])
+check_data <- true_split_I[[2]] %>% mutate(Signal_pred = pred_test_I, Signal = as.factor(Signal))
+
+ggplot(check_data, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 750$ GeV and $ \\chi_1^0 =1 $ GeV")) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+par(pty = "s")
+roc(true_split_I[[2]]$Signal, pred_test_I, 
+    plot = TRUE, smoothed = TRUE, legacy.axes = TRUE, percent = TRUE, 
+    xlab = "False Positive Rate (FPR)", ylab = "True Positive Rate (TPR)", col = "blue3",
+    ci = TRUE, ci.alpha = 0.9, stratified = FALSE,
+    auc = TRUE, grid=TRUE, print.auc=TRUE, print.auc.x = 70, print.auc.y = 55, show.thres=TRUE)
+
+xgb.ggplot.importance(xgb.importance(model = tr_test_I))
+
+nrow(check_data[check_data$Signal_pred>=0.75,])
+```
+
+```{r}
+var <- true_split_I[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "BJet.PT", "Signal") %>% sample_n(5000)
+col <- if_else(var$Signal==0, "blue", "red")
+
+t_I <- save_history(select(var, -"Signal"), guided_tour(ashapetour(cl = col, alpha = 0.4, hull_var = c("blue", "red"))))
+X11()
+animate_xy(select(var, -"Signal"), guided_tour(ashapetour(cl = col, alpha = 0.4, hull_var = c("blue", "red")), alpha = 1, cooling = 0.5, search_f = tourr:::search_better), col = col, axes="bottomleft")
+X11()
+
+# Save the tour plot
+render(select(var, -"Signal"), planned_tour(t_I), display_xy(col = col), "png", "/home/user1/Documents/Project/Created Figures/alpha_I.png")
+```
+
+
+```{r, message = F}
+# Load the data of interest
+stop <- read.delim(file = "/home/user1/Desktop/Root files/check.txt", sep = ",") 
+stop$Signal <-  rep(1,nrow(stop))
+
+Data_check <- make_data(stop, topData)
+true_split_check <- true_partition(Data_check)
+part_split_check <- part_partition(true_split_check[[1]])
+rm(stop)
+
+xgb_bm_check <- xgb_data(true_split_check, part_split_check)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
+
+tr_test_check <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm_check[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+pred_test_check <- predict(tr_test_check, xgb_bm_check[[2]])
+data <- true_split_check[[2]] %>% mutate(Signal_pred = pred_test_check, Signal = as.factor(Signal))
+
+ggplot(data, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 300 $ GeV")) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+
+
+for (i in 1:NROW(pred_test_check)){
+  if (pred_test_check[i] > 0.8){
+       pred_test_check[i] = 1
+     } else {
+       pred_test_check[i] = 0
+     }
+}
+
+      
+confusionMatrix(table(pred_test_check, true_split_check[[2]]$Signal))
+
+vals_check <- Values(pred_test_check, true_split_check, Data_check, 0.579584)
+
+```
+
+
+```{r}
+test <- concaveman(as.matrix(var1))
+plot(var1)
+plot(test, add = TRUE)
 ```
