@@ -27,6 +27,7 @@ library(V8)
 library(sf)
 library(concaveman)
 library(purrr)
+library(spinebil)
 rm(list = ls(all.names = TRUE))
 ```
 
@@ -273,7 +274,6 @@ Values <- function(pred, true, data, stopCS){ # data1 = predicted, data2 = true,
 ```
 
 
-
 This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
 
 1) Stop benchmark 1 $ \tilde{t}= \text{TeV}, \chi_1^0 = \text{GeV} $. 
@@ -382,7 +382,7 @@ Build an XGBoost model according to automl (Ensemble methods are not to be consi
 xgb_bm1 <- xgb_data(true_split1, part_split1)
 # 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
 
-tr_test1 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+tr_test1 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 200, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
 
 pred_test1 <- predict(tr_test1, xgb_bm1[[2]])
 check_data1 <- true_split1[[2]] %>% mutate(Signal_pred = pred_test1, Signal = as.factor(Signal))
@@ -435,15 +435,17 @@ trace <- getTrace(select(var1, -"Signal"), m, indexList, indexLabels)
 plotTrace(trace)
 ```
 
-Find the most optimal parameter
+Find the most optimal parameter (DO NOT USE THIS JUST YET)
 ```{r}
-param <- list(booster = "gbtree", objective = "multi:softmax", num_class = 2)
+param <- list(booster = "gbtree", objective = "binary:logistic")
 
 new_param <- expand.grid(
-  nrounds = seq(from = 50, to = 500, by = 50),
-  eta = seq(from = 0.1, to = 0.5, by = 0.1),
-  max_depth = 4:8, 
-  eval_metric = "merror"
+  n_estimators = 500,
+  nrounds = 500,
+  eta = seq(from = 0.1, to = 0.4, by = 0.1),
+  max_depth = 4:6, 
+  eval_metric = "logloss",
+  alpha = c(1e-5, 1e-2, 0.1, 1, 100)
 )
 
 new_param <- new_param %>%
@@ -454,9 +456,9 @@ new_param <- new_param %>%
 # Perform xgboost cv and extract minimum test MSE mean from each xgbcv
 xgbcv_result <- matrix(nrow = NROW(new_param), ncol = 2) 
 
-for (i in 1:(NROW(new_param)/5)){
+for (i in 1:NROW(new_param)){
   xgbcv <- 
-    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
+    xgb.cv(params = new_param[i,], data = xgb_bm1[[3]], nrounds = new_param[i,2],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
            maximize = F)
   xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
@@ -464,44 +466,7 @@ for (i in 1:(NROW(new_param)/5)){
   rm(xgbcv)
 }
 
-for (i in (NROW(new_param)/5):(2*NROW(new_param)/5)){
-  xgbcv <- 
-    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
-           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
-           maximize = F)
-  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
-  xgbcv_result[i,2] <- xgbcv$best_iteration
-  rm(xgbcv)
-}
-for (i in (2*NROW(new_param)/5):(3*NROW(new_param)/5)){
-  xgbcv <- 
-    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
-           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
-           maximize = F)
-  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
-  xgbcv_result[i,2] <- xgbcv$best_iteration
-  rm(xgbcv)
-}
 
-for (i in (3*NROW(new_param)/5):(4*NROW(new_param)/5)){
-  xgbcv <- 
-    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
-           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
-           maximize = F)
-  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
-  xgbcv_result[i,2] <- xgbcv$best_iteration
-  rm(xgbcv)
-}
-
-for (i in (4*NROW(new_param))/5:NROW(new_param)){
-  xgbcv <- 
-    xgb.cv(params = new_param[i,], data = xgb_tr, nrounds = new_param[i,1],
-           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
-           maximize = F)
-  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
-  xgbcv_result[i,2] <- xgbcv$best_iteration
-  rm(xgbcv)
-}
 #### row/list number of the best xgbcv
 best_xgbcv <- which.min(xgbcv_result[,1])
 
@@ -509,20 +474,15 @@ best_param <- new_param[best_xgbcv,]
 
 # train on partitioned set
 tr_test <- xgb.train(params = best_param, data = xgb_tr, nrounds =xgbcv_result[best_xgbcv,2])
-pred_test <- predict(tr_test, xgb_ts)
-confusionMatrix(table(pred_test, part_test$Signal))
+pred_test <- predict(tr_test, xgb_bm1[[4]])
+confusionMatrix(table(pred_test, part_split1[[2]]$Signal))
 
 # train on original training set
-bm01_tr <- model.matrix(~. + 0, data = true_train %>% select(-Signal))
-xgb_bm01 <- xgb.DMatrix(data = bm01_tr, label = true_train$Signal)
-
 tr_xgb <- xgb.train(params = best_param, 
-          data = xgb_bm01, nrounds = xgbcv[[best_xgbcv]]$best_iteration)
+          data = xgb_bm1[[1]], nrounds = xgbcv[[best_xgbcv]]$best_iteration)
 
 # test error after prediction
-bm01_ts <- model.matrix(~. + 0, data = bm01_ts %>% select(-Signal))
-ts_xgbM <- xgb.DMatrix(data = bm01_ts %>% select(-Signal))
-xgbpred <- predict(tr_xgb, ts_xgbM)
+xgbpred <- predict(tr_xgb, xgb_bm1[[2]])
 ```
 
 Using the h2o version to see if it doesn't crash...
