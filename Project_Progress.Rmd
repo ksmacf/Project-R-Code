@@ -408,16 +408,31 @@ b1_vals
 
 Visualisation using guided tours
 ```{r}
-var1 <- true_split1[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Lepton.Eta", "BJet.Eta", "Signal") %>% sample_n(5000)
+var1 <- true_split1[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Lepton.Eta", "BJet.Eta","Signal") %>% sample_n(500)
 col1 <- if_else(var1$Signal==0, "blue", "red")
+var1 <- apply(var1, 2, scale)
 
-t1 <- save_history(select(var1, -"Signal"), guided_tour(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red"))))
+
+t1 <- save_history(var1[,-11], guided_tour(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5))
+
+set.seed(100)
 X11()
-  animate_xy(select(var1, -"Signal"), guided_tour(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red"))), col = col1, axes="bottomleft")
+animate_xy(var1[,-11], guided_tour(index_f = ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), col = col1)
 X11()
 
 # Save the tour plot
-render(select(var1, -"Signal"), planned_tour(t1), display_xy(col = col1), "png", "/home/user1/Documents/Project/Created Figures/alpha.png")
+#render(select(var1, -"Signal"), planned_tour(t1), display_xy(col = col1), "png", "/home/user1/Documents/Project/Created Figures/alpha.png")
+#
+```
+
+Using the spinebil function to see how the index performs
+```{r}
+
+m <- list(basisMatrix(1,2,10), basisMatrix(3,4,10))
+indexList <- list(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red")))
+indexLabels <- list("alpha")
+trace <- getTrace(select(var1, -"Signal"), m, indexList, indexLabels)
+plotTrace(trace)
 ```
 
 Find the most optimal parameter
@@ -525,12 +540,14 @@ part_tr <- as.h2o(part_split1[[1]], destination_frame = "part_train")
 part_ts <- as.h2o(part_split1[[2]], destination_frame = "part_test")
   
 
-h2o.xgb_param <- expand.grid(
-  ntrees = seq(from = 400, to = 500, by = 50),
-  max_depth = 5:7,
-  col_sample_rate = c(0.5, 0.75, 1.0),
-  learn_rate = seq(from = 0.2, to = 0.6, by = 0.1),
-  stopping_metric = c("mse", "rmse", "logloss")
+h2o.xgb_param <- list(
+  ntrees = 500, # 500 seemed to be the best from previous run
+  max_depth = 5:7, # 5 showed to be the best from previous run
+  col_sample_rate = 1.0, # found to be 1.0 from choices of 0.5, 0.75 and 1.0
+  learn_rate = seq(from = 0.1, to = 0.3, by = 0.1),
+  stopping_metric = "logloss", # logloss was found to be (by majority) the best
+  min_split_improvement = seq(from = 0, to = 0.2, by = 0.05) # gamma = 0 seemed to be the best
+  #alpha = c(0, 1e-5, 1e-2, 0.1, 1, 100)
 )
 
 grid <- h2o.grid("gbm", 
@@ -543,16 +560,17 @@ grid <- h2o.grid("gbm",
                  distribution = "bernoulli",
                  hyper_params = h2o.xgb_param)
 
-          grid_results <- h2o.getGrid(grid_id = "grid", sort_by = "auc", decreasing = TRUE)
+grid_results <- h2o.getGrid(grid_id = "grid", sort_by = "auc", decreasing = TRUE)
 best_model <- h2o.getModel(grid_results@model_ids[[1]])
 
 ```
+
 A test performace shows that RMSE is the best choice as a stopping metric without any other parameters tuned. 
-Will  this change when others are tuned?
-Turns out MSE was the better choice this time, so it may go back and forth, but it seems taking the mean squared error itself is most optimal for this problem.
+Will  this change when others are tuned? - logloss seemed to perform better when other parameters are tuned.
+
 
 ```{r}
-# Perform xgboost cv
+# Perform xgboost with the h2o version
 xgb_h2o <- h2o.xgboost(y = "Signal",
                        x = best_model@allparameters$x,
                        training_frame = true_tr,
@@ -688,7 +706,7 @@ animate_xy(select(var2, -"Signal"), planned_tour(t2), col = col2, axes="bottomle
 X11()
 
 # Save the tour plot
-render(select(var2, -"Signal"), planned_tour(t2), display_xy(col = col2), "png", "/home/user1/Documents/Project/Created Figures/alpha2.png")
+#render(select(var2, -"Signal"), planned_tour(t2), display_xy(col = col2), "png", "/home/user1/Documents/Project/Created Figures/alpha2.png")
 
 
 var3 <- true_split3[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal") %>% sample_n(5000)
@@ -700,7 +718,7 @@ animate_xy(select(var3, -"Signal"), guided_tour(lda_pp(col)), col = col3, axes="
 X11()
 
 # Save the tour plot
-render(select(var3, -"Signal"), guided_tour(ashapetour(cl = col3, alpha = 0.4, hull_var = c("blue", "red"))), display_xy(col = col3), "png", "/home/user1/Documents/Project/Created Figures/alpha3.png")
+#render(select(var3, -"Signal"), guided_tour(ashapetour(cl = col3, alpha = 0.4, hull_var = c("blue", "red"))), display_xy(col = col3), "png", "/home/user1/Documents/Project/Created Figures/alpha3.png")
 ```
 
 
@@ -790,7 +808,7 @@ animate_xy(select(var, -"Signal"), guided_tour(ashapetour(cl = col, alpha = 0.4,
 X11()
 
 # Save the tour plot
-render(select(var, -"Signal"), planned_tour(t_I), display_xy(col = col), "png", "/home/user1/Documents/Project/Created Figures/alpha_I.png")
+#render(select(var, -"Signal"), planned_tour(t_I), display_xy(col = col), "png", "/home/user1/Documents/Project/Created Figures/alpha_I.png")
 ```
 
 
