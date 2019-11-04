@@ -375,25 +375,23 @@ check3
 ```
 
 
-
 Build an XGBoost model according to automl (Ensemble methods are not to be considered).
-----Testing with the first benchmark set.
+
 ```{r}
 xgb_bm1 <- xgb_data(true_split1, part_split1)
 # 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
+xgb_bm2 <- xgb_data(true_split2, part_split2)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
+xgb_bm3 <- xgb_data(true_split3, part_split3)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
+```
 
+----Testing with the first benchmark set.
+```{r}
 tr_test1 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 200, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
 
 pred_test1 <- predict(tr_test1, xgb_bm1[[2]])
-check_data1 <- true_split1[[2]] %>% mutate(Signal_pred = pred_test1, Signal = as.factor(Signal))
 
-ggplot(check_data1, aes(x = Signal_pred, fill = Signal)) +
-  geom_histogram(bins = 50, alpha=.5, position="identity") +
-  scale_y_continuous(trans = 'log10') +
-  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV")) +
-  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
-
-# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 for (i in 1:NROW(pred_test1)){
   if (pred_test1[i] > 0.6){
        pred_test1[i] = 1
@@ -401,10 +399,101 @@ for (i in 1:NROW(pred_test1)){
        pred_test1[i] = 0
      }
 }
+
 confusionMatrix(table(pred_test1, true_split1[[2]]$Signal))
-b1_vals <- Values(pred_test1, true_split1, Data_Benchmark01, 0.1593)
+```
+
+Find the most optimal parameter (This is working fine now. Takes a few hours to run 60 parameters)
+```{r message=False, warning=TRUE}
+param <- list(booster = "gbtree", objective = "binary:logistic")
+
+new_param <- expand.grid(
+  n_estimators = 500,
+  nrounds = 500,
+  eta = seq(from = 0.1, to = 0.4, by = 0.1), # first try said 0.2 is a godo number, consistent with the h2o version
+  max_depth = 4:6, # first try said 5, consistent with the h2o version
+  eval_metric = "logloss",
+  alpha = c(0.1, 0.5, 1, 2, 5, 10) # first try said 1 is a good number, so test values closer to it
+)
+
+new_param <- new_param %>%
+  mutate(!!! param)
+```
+
+
+1) Benchmark 1
+```{r}
+# Perform xgboost cv and extract minimum test MSE mean from each xgbcv
+xgbcv_result1 <- matrix(nrow = NROW(new_param), ncol = 2) 
+
+for (i in 1:NROW(new_param)){
+  xgbcv <- 
+    xgb.cv(params = new_param[i,], data = xgb_bm1[[3]], nrounds = new_param[i,2],
+           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
+           maximize = F)
+  xgbcv_result1[i,1] <- min(xgbcv$evaluation_log$test_logloss_mean)
+  xgbcv_result1[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
+}
+
+
+#### row/list number of the best xgbcv
+best_xgbcv <- which.min(xgbcv_result1[,1])
+best_param <- new_param[best_xgbcv,]
+
+# train on partitioned set
+tr_test1 <- xgb.train(params = best_param, data = xgb_bm1[[3]], nrounds =xgbcv_result1[best_xgbcv,2])
+pred_test1 <- predict(tr_test1, xgb_bm1[[4]])
+
+# Do a check to see what is a good cut-off
+check <- part_split1[[2]] %>% mutate(Signal_pred = pred_test1, Signal = as.factor(Signal))
+ggplot(check, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV" - Preliminary)) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+for (i in 1:NROW(check$Signal_pred)){
+  if (check$Signal_pred[i] > 0.6){
+       check$Signal_pred[i] = 1
+     } else {
+       check$Signal_pred[i] = 0
+     }
+}
+confusionMatrix(table(check$Signal_pred, check$Signal))
+rm(check)
+
+# train on original training set
+tr_xgb1 <- xgb.train(params = best_param, 
+          data = xgb_bm1[[1]], nrounds = xgbcv_result1[best_xgbcv,2])
+
+# test error after prediction
+xgbpred1 <- predict(tr_xgb1, xgb_bm1[[2]])
+
+
+check_data1 <- true_split1[[2]] %>% mutate(Signal_pred = xgbpred1, Signal = as.factor(Signal))
+ggplot(check_data1, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV")) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
+
+for (i in 1:NROW(check_data1$Signal_pred)){
+  if (check_data1$Signal_pred[i] > 0.6){
+       check_data1$Signal_pred[i] = 1
+     } else {
+       check_data1$Signal_pred[i] = 0
+     }
+}
+confusionMatrix(table(check_data1$Signal_pred, check_data1$Signal))
+
+# Get relevant values off the outcome
+b1_vals <- Values(check_data1$Signal_pred, true_split1, Data_Benchmark01, 0.1593)
 b1_vals
 ```
+
 
 Visualisation using guided tours
 ```{r}
@@ -427,7 +516,6 @@ X11()
 
 Using the spinebil function to see how the index performs
 ```{r}
-
 m <- list(basisMatrix(1,2,10), basisMatrix(3,4,10))
 indexList <- list(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red")))
 indexLabels <- list("alpha")
@@ -435,55 +523,6 @@ trace <- getTrace(select(var1, -"Signal"), m, indexList, indexLabels)
 plotTrace(trace)
 ```
 
-Find the most optimal parameter (DO NOT USE THIS JUST YET)
-```{r}
-param <- list(booster = "gbtree", objective = "binary:logistic")
-
-new_param <- expand.grid(
-  n_estimators = 500,
-  nrounds = 500,
-  eta = seq(from = 0.1, to = 0.4, by = 0.1),
-  max_depth = 4:6, 
-  eval_metric = "logloss",
-  alpha = c(1e-5, 1e-2, 0.1, 1, 100)
-)
-
-new_param <- new_param %>%
-  mutate(!!! param)
-
-#rm(lepPT_check, ttbarlepPT_check, tr_indx, tr_indx2, Data_benchmark01, stopbm1, stopbm1_rmv, topData, topData_rmv)
-
-# Perform xgboost cv and extract minimum test MSE mean from each xgbcv
-xgbcv_result <- matrix(nrow = NROW(new_param), ncol = 2) 
-
-for (i in 1:NROW(new_param)){
-  xgbcv <- 
-    xgb.cv(params = new_param[i,], data = xgb_bm1[[3]], nrounds = new_param[i,2],
-           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
-           maximize = F)
-  xgbcv_result[i,1] <- min(xgbcv$evaluation_log$test_merror_mean)
-  xgbcv_result[i,2] <- xgbcv$best_iteration
-  rm(xgbcv)
-}
-
-
-#### row/list number of the best xgbcv
-best_xgbcv <- which.min(xgbcv_result[,1])
-
-best_param <- new_param[best_xgbcv,]
-
-# train on partitioned set
-tr_test <- xgb.train(params = best_param, data = xgb_tr, nrounds =xgbcv_result[best_xgbcv,2])
-pred_test <- predict(tr_test, xgb_bm1[[4]])
-confusionMatrix(table(pred_test, part_split1[[2]]$Signal))
-
-# train on original training set
-tr_xgb <- xgb.train(params = best_param, 
-          data = xgb_bm1[[1]], nrounds = xgbcv[[best_xgbcv]]$best_iteration)
-
-# test error after prediction
-xgbpred <- predict(tr_xgb, xgb_bm1[[2]])
-```
 
 Using the h2o version to see if it doesn't crash...
 ```{r}
@@ -527,7 +566,6 @@ best_model <- h2o.getModel(grid_results@model_ids[[1]])
 
 A test performace shows that RMSE is the best choice as a stopping metric without any other parameters tuned. 
 Will  this change when others are tuned? - logloss seemed to perform better when other parameters are tuned.
-
 
 ```{r}
 # Perform xgboost with the h2o version
@@ -601,14 +639,64 @@ This section onwards follows from above, but with the other benchmark
 
 Checking how other benchmarks' classifier perform.
 ```{r}
-xgb_bm2 <- xgb_data(true_split2, part_split2)
-# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
-
 tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm2[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
 pred_test2 <- predict(tr_test2, xgb_bm2[[2]])
+######################################################################################################################################
 
-check_data2 <- true_split2[[2]] %>% mutate(Signal_pred = pred_test2, Signal = as.factor(Signal))
+tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
 
+```
+
+2) Benchmark 2 classifier
+```{r, message = False}
+# Perform xgboost cv and extract minimum test MSE mean from each xgbcv
+xgbcv_result2 <- matrix(nrow = NROW(new_param), ncol = 2) 
+
+for (i in 1:NROW(new_param)){
+  xgbcv <- 
+    xgb.cv(params = new_param[i,], data = xgb_bm2[[3]], nrounds = new_param[i,2],
+           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
+           maximize = F)
+  xgbcv_result2[i,1] <- min(xgbcv$evaluation_log$test_logloss_mean)
+  xgbcv_result2[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
+}
+
+# row/list number of the best xgbcv
+best_xgbcv <- which.min(xgbcv_result2[,1])
+best_param <- new_param[best_xgbcv,]
+
+# train on partitioned set
+tr_test2 <- xgb.train(params = best_param, data = xgb_bm2[[3]], nrounds = xgbcv_result2[best_xgbcv,2])
+pred_test2 <- predict(tr_test2, xgb_bm2[[4]])
+
+# Do a check to see what is a good cut-off
+check <- part_split3[[2]] %>% mutate(Signal_pred = pred_test2, Signal = as.factor(Signal))
+ggplot(check, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV" - Preliminary)) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+for (i in 1:NROW(check$Signal_pred)){
+  if (check$Signal_pred[i] > 0.6){
+       check$Signal_pred[i] = 1
+     } else {
+       check$Signal_pred[i] = 0
+     }
+}
+confusionMatrix(table(check$Signal_pred, check$Signal))
+rm(check)
+
+# train on original training set
+tr_xgb2 <- xgb.train(params = best_param, 
+          data = xgb_bm2[[1]], nrounds = xgbcv_result2[best_xgbcv,2])
+
+# test error after prediction
+xgbpred2 <- predict(tr_xgb2, xgb_bm2[[2]])
+
+check_data2 <- true_split2[[2]] %>% mutate(Signal_pred = xgbpred2, Signal = as.factor(Signal))
 ggplot(check_data2, aes(x = Signal_pred, fill = Signal)) +
   geom_histogram(bins = 50, alpha=.5, position="identity") +
   scale_y_continuous(trans = 'log10') +
@@ -616,43 +704,18 @@ ggplot(check_data2, aes(x = Signal_pred, fill = Signal)) +
   labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
 
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-for (i in 1:NROW(pred_test2)){
-  if (pred_test2[i] > 0.6){
-       pred_test2[i] = 1
+
+for (i in 1:NROW(check_data2$Signal_pred)){
+  if (check_data2$Signal_pred[i] > 0.6){
+       check_data2$Signal_pred[i] = 1
      } else {
-       pred_test2[i] = 0
+       check_data2$Signal_pred[i] = 0
      }
 }
-confusionMatrix(table(pred_test2, true_split2[[2]]$Signal))
-b2_vals <- Values(pred_test2, true_split2, Data_Benchmark02, 2.877)
+confusionMatrix(table(check_data2$Signal_pred, check_data2$Signal))
+
+b2_vals <- Values(check_data2$Signal_pred, true_split2, Data_Benchmark02, 2.877)
 b2_vals
-
-######################################################################################################################################
-xgb_bm3 <- xgb_data(true_split3, part_split3)
-# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
-
-tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
-pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
-
-check_data3 <- true_split3[[2]] %>% mutate(Signal_pred = pred_test3, Signal = as.factor(Signal))
-
-ggplot(check_data3, aes(x = Signal_pred, fill = Signal)) +
-  geom_histogram(bins = 50, alpha=.5, position="identity") +
-  scale_y_continuous(trans = 'log10') +
-  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.25$ TeV and $ \\chi_1^0 = 100 $ GeV")) +
-  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
-
-# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-for (i in 1:NROW(pred_test3)){
-  if (pred_test3[i] > 0.5){
-       pred_test3[i] = 1
-     } else {
-       pred_test3[i] = 0
-     }
-}
-confusionMatrix(table(pred_test3, true_split3[[2]]$Signal))
-b3_vals <- Values(pred_test3, true_split3, Data_Benchmark01, 0.6571)
-b3_vals
 ```
 
 Visualization with a guided tour
@@ -667,8 +730,79 @@ X11()
 
 # Save the tour plot
 #render(select(var2, -"Signal"), planned_tour(t2), display_xy(col = col2), "png", "/home/user1/Documents/Project/Created Figures/alpha2.png")
+```
 
+3) Benchmark 3
+```{r, message = False}
+xgbcv_result3 <- matrix(nrow = NROW(new_param), ncol = 2) 
 
+for (i in 1:NROW(new_param)){
+  xgbcv <- 
+    xgb.cv(params = new_param[i,], data = xgb_bm3[[3]], nrounds = new_param[i,2],
+           nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
+           maximize = F)
+  xgbcv_result3[i,1] <- min(xgbcv$evaluation_log$test_logloss_mean)
+  xgbcv_result3[i,2] <- xgbcv$best_iteration
+  rm(xgbcv)
+}
+
+# row/list number of the best xgbcv
+best_xgbcv <- which.min(xgbcv_result3[,1])
+best_param <- new_param[best_xgbcv,]
+
+# train on partitioned set
+tr_test3 <- xgb.train(params = best_param, data = xgb_bm3[[3]], nrounds = xgbcv_result3[best_xgbcv,2])
+pred_test3 <- predict(tr_test3, xgb_bm3[[4]])
+
+# Do a check to see what is a good cut-off
+check <- part_split3[[2]] %>% mutate(Signal_pred = pred_test3, Signal = as.factor(Signal))
+ggplot(check, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV" - Preliminary)) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+for (i in 1:NROW(check$Signal_pred)){
+  if (check$Signal_pred[i] > 0.6){
+       check$Signal_pred[i] = 1
+     } else {
+       check$Signal_pred[i] = 0
+     }
+}
+confusionMatrix(table(check$Signal_pred, check$Signal))
+rm(check)
+
+# train on original training set
+tr_xgb3 <- xgb.train(params = best_param, 
+          data = xgb_bm3[[1]], nrounds = xgbcv_result3[best_xgbcv,2])
+
+# test error after prediction
+xgbpred3 <- predict(tr_xgb3, xgb_bm3[[2]])
+
+check_data3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3, Signal = as.factor(Signal))
+ggplot(check_data3, aes(x = Signal_pred, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position="identity") +
+  scale_y_continuous(trans = 'log10') +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.25$ TeV and $ \\chi_1^0 = 100 $ GeV")) +
+  labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
+
+# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
+
+for (i in 1:NROW(check_data3$Signal_pred)){
+  if (check_data3$Signal_pred[i] > 0.6){
+       check_data3$Signal_pred[i] = 1
+     } else {
+       check_data3$Signal_pred[i] = 0
+     }
+}
+confusionMatrix(table(check_data3$Signal_pred, check_data3$Signal))
+
+b3_vals <- Values(check_data2$Signal_pred, true_split3, Data_Benchmark03, 0.6571)
+b3_vals
+```
+
+Visualisation using tourr
+```{r}
 var3 <- true_split3[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal") %>% sample_n(5000)
 col3 <- if_else(var3$Signal==0, "blue", "red")
 
@@ -812,9 +946,3 @@ vals_check <- Values(pred_test_check, true_split_check, Data_check, 0.579584)
 
 ```
 
-
-```{r}
-test <- concaveman(as.matrix(var1))
-plot(var1)
-plot(test, add = TRUE)
-```
