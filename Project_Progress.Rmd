@@ -386,9 +386,9 @@ xgb_bm3 <- xgb_data(true_split3, part_split3)
 # 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
 ```
 
-----Testing with the first benchmark set.
+Testing with the first benchmark set.
 ```{r}
-tr_test1 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 200, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
+tr_test1 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm1[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
 
 pred_test1 <- predict(tr_test1, xgb_bm1[[2]])
 
@@ -411,9 +411,9 @@ new_param <- expand.grid(
   n_estimators = 500,
   nrounds = 500,
   eta = seq(from = 0.1, to = 0.4, by = 0.1), # first try said 0.2 is a godo number, consistent with the h2o version
-  max_depth = 4:6, # first try said 5, consistent with the h2o version
+  max_depth = 5, # first try said 5, consistent with the h2o version
   eval_metric = "logloss",
-  alpha = c(0.1, 0.5, 1, 2, 5, 10) # first try said 1 is a good number, so test values closer to it
+  alpha = 10:20 # first try said 1 is a good number, so test values closer to it -> turns out 10 was also a good number :/ and then 20... then 17 when checking between 10 and 20
 )
 
 new_param <- new_param %>%
@@ -450,7 +450,7 @@ check <- part_split1[[2]] %>% mutate(Signal_pred = pred_test1, Signal = as.facto
 ggplot(check, aes(x = Signal_pred, fill = Signal)) +
   geom_histogram(bins = 50, alpha=.5, position="identity") +
   scale_y_continuous(trans = 'log10') +
-  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV" - Preliminary)) +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV - Preliminary")) +
   labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
 
 for (i in 1:NROW(check$Signal_pred)){
@@ -488,6 +488,7 @@ for (i in 1:NROW(check_data1$Signal_pred)){
      }
 }
 confusionMatrix(table(check_data1$Signal_pred, check_data1$Signal))
+# First was 0.920, then increased by 0.001 after a few tries testing the alpha ranges
 
 # Get relevant values off the outcome
 b1_vals <- Values(check_data1$Signal_pred, true_split1, Data_Benchmark01, 0.1593)
@@ -497,29 +498,46 @@ b1_vals
 
 Visualisation using guided tours
 ```{r}
-var1 <- true_split1[[2]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Lepton.Eta", "BJet.Eta","Signal") %>% sample_n(500)
-col1 <- if_else(var1$Signal==0, "blue", "red")
-var1 <- apply(var1, 2, scale)
+var1 <- true_split1[[2]] %>% mutate(Signal_pred = xgbpred1) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Lepton.Eta", "BJet.Eta", "Signal", "Signal_pred") %>% sample_n(NROW(true_split1[[2]])/10)
 
+for (i in 1:NROW(var1$Signal_pred)){
+  if (var1$Signal_pred[i] > 0.6){
+       var1$Signal_pred[i] = 1
+     } else {
+       var1$Signal_pred[i] = 0
+     }
+}
+#write_csv(var1, "/home/user1/Desktop/var1.csv")
+col1 <- if_else(var1$Signal==0, "black", "blue")
+col1_2 <- if_else(var1$Signal_pred==0, "black", "blue")
+# Background = black, Signal = blue
+col1_check <- col1
+col_v1 <- cbind(col1, col1_2, col1_check)
+col_v1[col_v1[,1]!=col_v1[,2],3] <- if_else(col_v1[col_v1[,1]!=col_v1[,2],1]=="blue", "green", "red")   
+var1[col_v1[,1]!=col_v1[,2],12] <- if_else(col_v1[col_v1[,1]!=col_v1[,2],1]=="blue", 2, 3)  
+# False positive = Green/2 and False negative = red/3
 
-t1 <- save_history(var1[,-11], guided_tour(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5))
+var1 <- apply(var1[,-11], 2, scale)
+#col_v1[which(col_v1[,1]!=col_v1[,2]),]
+set.seed(1000)
+t1 <- save_history(var1[,-11], guided_tour(ashapetour(cl = col_v1[,3], alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
-set.seed(100)
 X11()
-animate_xy(var1[,-11], guided_tour(index_f = ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), col = col1)
+animate_xy(var1[,-11], planned_tour(t1), col = col_v1[,3], fps = 50)
+#dev.copy2pdf(file = "/home/user1/Desktop/Images for thesis/tourr/test.pdf") # is supposed to copy the plot in pdf
 X11()
 
 # Save the tour plot
-#render(select(var1, -"Signal"), planned_tour(t1), display_xy(col = col1), "png", "/home/user1/Documents/Project/Created Figures/alpha.png")
-#
+render(var1[,-11], planned_tour(t1), display_xy(col = col_v1[,3]), frames = 50, "pdf", "/home/user1/Desktop/Images for thesis/tourr/bm1.pdf")
+# pdf version actually captures the whole path
 ```
 
 Using the spinebil function to see how the index performs
 ```{r}
-m <- list(basisMatrix(1,2,10), basisMatrix(3,4,10))
-indexList <- list(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue", "red")))
+m <- list(basisMatrix(5,6,10), basisMatrix(3,4,10))
+indexList <- list(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue")))
 indexLabels <- list("alpha")
-trace <- getTrace(select(var1, -"Signal"), m, indexList, indexLabels)
+trace <- getTrace(var1[,-11], m, indexList, indexLabels)
 plotTrace(trace)
 ```
 
@@ -639,13 +657,30 @@ This section onwards follows from above, but with the other benchmark
 
 Checking how other benchmarks' classifier perform.
 ```{r}
-tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm2[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm2[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
 pred_test2 <- predict(tr_test2, xgb_bm2[[2]])
+for (i in 1:NROW(pred_test2)){
+  if (pred_test2[i] > 0.6){
+       pred_test2[i] = 1
+     } else {
+       pred_test2[i] = 0
+     }
+}
+confusionMatrix(table(pred_test2, true_split2[[2]]$Signal))
+# Preliminary results show around 0.935
 ######################################################################################################################################
 
-tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 200, max_depth = 6, eval_metric = "rmse")
+tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
 pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
-
+for (i in 1:NROW(pred_test3)){
+  if (pred_test3[i] > 0.6){
+       pred_test3[i] = 1
+     } else {
+       pred_test3[i] = 0
+     }
+}
+confusionMatrix(table(pred_test3, true_split3[[2]]$Signal))
+# Preliminary results show around 0.945
 ```
 
 2) Benchmark 2 classifier
@@ -672,21 +707,21 @@ tr_test2 <- xgb.train(params = best_param, data = xgb_bm2[[3]], nrounds = xgbcv_
 pred_test2 <- predict(tr_test2, xgb_bm2[[4]])
 
 # Do a check to see what is a good cut-off
-check <- part_split3[[2]] %>% mutate(Signal_pred = pred_test2, Signal = as.factor(Signal))
+check <- part_split2[[2]] %>% mutate(Signal_pred = pred_test2, Signal = as.factor(Signal))
 ggplot(check, aes(x = Signal_pred, fill = Signal)) +
   geom_histogram(bins = 50, alpha=.5, position="identity") +
   scale_y_continuous(trans = 'log10') +
-  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV" - Preliminary)) +
+  ggtitle(TeX("Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV - Preliminary")) +
   labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type")
 
 for (i in 1:NROW(check$Signal_pred)){
-  if (check$Signal_pred[i] > 0.6){
+  if (check$Signal_pred[i] > 0.5){
        check$Signal_pred[i] = 1
      } else {
        check$Signal_pred[i] = 0
      }
 }
-confusionMatrix(table(check$Signal_pred, check$Signal))
+confusionMatrix(table(check$Signal_pred, check$Signal)) # Showed about 0.942
 rm(check)
 
 # train on original training set
@@ -706,13 +741,13 @@ ggplot(check_data2, aes(x = Signal_pred, fill = Signal)) +
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 
 for (i in 1:NROW(check_data2$Signal_pred)){
-  if (check_data2$Signal_pred[i] > 0.6){
+  if (check_data2$Signal_pred[i] > 0.5){
        check_data2$Signal_pred[i] = 1
      } else {
        check_data2$Signal_pred[i] = 0
      }
 }
-confusionMatrix(table(check_data2$Signal_pred, check_data2$Signal))
+confusionMatrix(table(check_data2$Signal_pred, check_data2$Signal)) # Cut-off at 0.5 showed about the same (0.942)
 
 b2_vals <- Values(check_data2$Signal_pred, true_split2, Data_Benchmark02, 2.877)
 b2_vals
@@ -818,9 +853,9 @@ X11()
 
 Create ROC curves based on the test models.
 ```{r}
-pred_test <- predict(tr_test, xgb_bm1[[2]])
-pred_test2 <- predict(tr_test2, xgb_bm2[[2]])
-pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
+xgbpred1 <- predict(tr_xgb1, xgb_bm3[[2]])
+xgbpred2 <- predict(tr_xgb2, xgb_bm3[[2]])
+xgbpred3 <- predict(tr_xgb3, xgb_bm3[[2]])
 par(pty = "s")
 roc(true_split1[[2]]$Signal, pred_test, 
     plot = TRUE, smoothed = TRUE, legacy.axes = TRUE, percent = TRUE, 
@@ -836,9 +871,9 @@ legend("bottomright", legend=c("Benchmark 1", "Benchmark 2", "Benchmark 3"), col
 ```
 
 ```{r}
-xgb.ggplot.importance(xgb.importance(model = tr_test))
-xgb.ggplot.importance(xgb.importance(model = tr_test2))
-xgb.ggplot.importance(xgb.importance(model = tr_test3))
+xgb.ggplot.importance(xgb.importance(model = tr_xgb1))
+xgb.ggplot.importance(xgb.importance(model = tr_xgb2))
+xgb.ggplot.importance(xgb.importance(model = tr_xgb3))
 ```
 
 
@@ -946,3 +981,17 @@ vals_check <- Values(pred_test_check, true_split_check, Data_check, 0.579584)
 
 ```
 
+
+```{r}
+
+animate_xy(flea[, 1:3], guided_tour(holes()), sphere = TRUE)
+X11()
+animate_xy(flea[, 1:6], guided_tour(holes()), sphere = TRUE)
+
+#animate_dist(flea[, 1:6], guided_tour(holes(), 1), sphere = TRUE)
+
+clrs <- c("#486030", "#c03018", "#f0a800")
+col <- clrs[as.numeric(flea$species)]
+X11()
+animate_xy(flea[, 1:6], guided_tour(lda_pp(flea[,7])), sphere = TRUE, col=col)
+```
