@@ -264,11 +264,11 @@ perform_cv <- function(Parameters, Data){
     xgb.cv(params = Parameters[i,], data = Data[[3]], nrounds = Parameters[i,2],
            nfold = 10, showsd = T, stratified = T, print_every_n = 10, early_stopping_round = 20,
            maximize = F)
-  Result1[i,1] <- min(xgbcv$evaluation_log$test_logloss_mean)
-  Result1[i,2] <- xgbcv$best_iteration
+  Result[i,1] <- min(xgbcv$evaluation_log$test_logloss_mean)
+  Result[i,2] <- xgbcv$best_iteration
   rm(xgbcv)
-  return(Result)
   }
+  return(Result)
 }
 
 assign_label <- function(Data, Value){
