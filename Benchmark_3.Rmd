@@ -1,0 +1,166 @@
+---
+title: "Untitled"
+author: "Kenji Macfarlane ID:26006480"
+date: "22/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Do a check first
+```{r}
+tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
+pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
+for (i in 1:NROW(pred_test3)){
+  if (pred_test3[i] > 0.6){
+       pred_test3[i] = 1
+     } else {
+       pred_test3[i] = 0
+     }
+}
+confusionMatrix(table(pred_test3, true_split3[[2]]$Signal))
+# Preliminary results show around 0.945
+```
+
+3) Benchmark 3 ($\tilde{t} = 1.25$ TeV and $\tilde{\chi}_1^0 = 100$ GeV)
+```{r, message = False}
+xgbcv_result3 <- perform_cv(new_param, xgb_bm3)
+# row/list number of the best xgbcv
+best_xgbcv <- which.min(xgbcv_result3[,1])
+best_param <- new_param[best_xgbcv,]
+
+# train on partitioned set
+tr_test3 <- xgb.train(params = best_param, data = xgb_bm3[[3]], nrounds = xgbcv_result3[best_xgbcv,2])
+pred_test3 <- predict(tr_test3, xgb_bm3[[4]])
+
+# Do a check to see what is a good cut-off
+check <- part_split3[[2]] %>% mutate(Signal_pred = pred_test3, Signal = as.factor(Signal))
+distribution(check, "Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $\\tilde{\chi}_1^0 = 400$ GeV - Preliminary")
+check <- assign_label(check, 0.6)
+confusionMatrix(table(check$Signal_pred, check$Signal)) # Showed 0.9494 accuracy
+rm(check)
+
+# train on original training set
+tr_xgb3 <- xgb.train(params = best_param, 
+          data = xgb_bm3[[1]], nrounds = xgbcv_result3[best_xgbcv,2])
+
+# test error after prediction
+xgbpred3 <- predict(tr_xgb3, xgb_bm3[[2]])
+
+check_data3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3, Signal = as.factor(Signal))
+distribution(check_data3, "Distribution of predicted events with $\\tilde{t} = 1.25$ TeV and $\\tilde{\\chi}_1^0 = 100$ GeV")
+
+# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
+check_data3 <- assign_label(check_data3, 0.6)
+
+confusionMatrix(table(check_data3$Signal_pred, check_data3$Signal)) # Showed an improvement to 0.9503
+
+b3_vals <- Values(check_data3$Signal_pred, true_split3, Data_Benchmark03, 0.6571)
+b3_vals
+```
+
+Visualisation using tourr
+```{r}
+var3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split3[[2]])/10)
+var3 <- assign_label(var3, 0.6)
+#write_csv(var1, "/home/user1/Desktop/var1.csv")
+col_v3 <- group_color(var3)   
+var3[col_v3[,1]!=col_v3[,2],"Signal_pred"] <- if_else(col_v3[col_v3[,1]!=col_v3[,2],1]=="black", 2, 3)  
+# False positive = Green/2 and False negative = red/3
+write_csv(as.data.frame(var3), "/home/user1/Desktop/var3.csv")
+
+# Rescale
+var3 <- rescale(var3[,-6])
+
+# Save tour history
+oldseed <- .Random.seed
+t3 <- save_history(var3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),-6], guided_tour(ashapetour(cl = col_v3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+
+X11()
+animate_xy(var3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),-6], planned_tour(t3), col = col_v3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),3], fps = 50)
+X11()
+
+htmlwidgets::saveWidget(as_widget(create_animation(t3, "/home/user1/Desktop/var3.csv", var3)), "/home/user1/Desktop/Images for thesis/tourr/bm3_test.html")
+
+# Save the tour plot  
+render(var3[,-6], planned_tour(t3), display_xy(col = col_v3), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm3/3/bm3_3-%03d.png")
+# pdf version actually captures the whole path
+```
+
+For the training set
+```{r}
+var3_tr <- true_split3[[1]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal") %>% sample_n(NROW(true_split3[[1]])/10)
+
+col_v3_tr <- if_else(var3_tr$Signal==0, "black", "blue")
+write_csv(as.data.frame(var3_tr), "/home/user1/Desktop/var3_tr.csv")
+# Rescale
+var3_tr <- rescale(var3_tr[,-6])
+
+# Save tour history
+t3_tr <- save_history(var3_tr, guided_tour(ashapetour(cl = col_v3_tr, alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+
+X11()
+animate_xy(var3_tr, planned_tour(t3), col = col_v3_tr, fps = 50)
+X11()
+
+htmlwidgets::saveWidget(as_widget(create_animation_tr(t3, "/home/user1/Desktop/var3_tr.csv", var3_tr)), "/home/user1/Desktop/Images for thesis/tourr/bm3_test_tr.html")
+
+# Save the tour plot
+render(var3_tr, planned_tour(t3_tr), display_xy(col = col_v3_tr), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm2/bm2_tr1-%03d.png")
+# pdf version actually captures the whole path
+```
+
+```{r}
+# tour for only the misclassified points
+false3 <- read_csv("/home/user1/Desktop/var3.csv")
+false3 <- subset(false3, col_v3[,1]!=col_v3[,2])
+
+col_f3 <- if_else(false3$Signal_pred=="2", "red", "blue") # blue is FN, red is FP
+write_csv(as.data.frame(false3), "/home/user1/Desktop/false3.csv")
+false3 <- rescale(select(false3, -"Signal"))
+
+f3 <- save_history(false3[,-ncol(false3)], guided_tour(ashapetour(cl = col_f3, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+
+X11()
+animate_xy(false3[,-ncol(false3)], planned_tour(f3), col = col_f3, fps = 50)
+X11()
+
+animation_FPFN(f3, "/home/user1/Desktop/false3.csv", false3)
+```
+
+```{r}
+# tour for only the misclassified points
+fntp3 <- read_csv("/home/user1/Desktop/var3.csv")
+fntp3 <- subset(fntp3, fntp3[,"Signal"]=="1")
+write_csv(as.data.frame(fntp3), "/home/user1/Desktop/fntp3.csv")
+col_sig3 <- if_else(fntp3$Signal_pred=="3", "red", "blue") # blue is TP, red is FN
+fntp3 <- rescale(select(fntp3, -"Signal"))
+
+sig3 <- save_history(fntp3[,-ncol(fntp3)], guided_tour(ashapetour(cl = col_sig3, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+
+X11()
+animate_xy(fntp3[,-ncol(fntp3)], planned_tour(sig3), col = col_back3, fps = 50)
+X11()
+
+animation_signal(sig3, "/home/user1/Desktop/fntp3.csv", fntp3)
+```
+
+```{r}
+# tour for only the misclassified points
+fptn3 <- read_csv("/home/user1/Desktop/var3.csv")
+fptn3 <- subset(fptn3, fptn3[,"Signal"]=="0")
+write_csv(as.data.frame(fptn3), "/home/user1/Desktop/fptn3.csv")
+col_back3 <- if_else(fptn3$Signal_pred=="2", "red", "blue") # blue is TN, red is FP
+fptn3 <- rescale(select(fptn3, -"Signal"))
+
+back3 <- save_history(fptn3[,-ncol(fptn3)], guided_tour(ashapetour(cl = col_back3, alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+
+X11()
+animate_xy(fptn3[,-ncol(fptn3)], planned_tour(back3), col = col_back3, fps = 50)
+X11()
+
+animation_background(back3, "/home/user1/Desktop/fptn3.csv", fptn3)
+```
+

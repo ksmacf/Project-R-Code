@@ -10,7 +10,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-
 ```{r, message = FALSE}
 # Load necessary libraries
 library(tidyverse)
@@ -373,6 +372,17 @@ part_split3 <- part_partition(true_split3[[1]])
 rm(stopbm3)
 ```
 
+4) Stop benchmark 4 $ \tilde{t}= 750 \text{GeV}, \chi_1^0 = 1 \text{GeV} $
+```{r, message = F}
+# Load the data of interest
+stop <- read.delim(file = "/home/user1/Desktop/Root files/inside_750GeV.txt", sep = ",") 
+stop$Signal <-  rep(1,nrow(stop))
+
+Data_Inside <- make_data(stop, topData)
+true_split_I <- true_partition(Data_Inside)
+part_split_I <- part_partition(true_split_I[[1]])
+rm(stop)
+```
 
 Using the h2o package, we can can split the data set into training and test sets
 ```{r, message=FALSE}
@@ -440,6 +450,9 @@ xgb_bm2 <- xgb_data(true_split2, part_split2)
 # 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
 xgb_bm3 <- xgb_data(true_split3, part_split3)
 # 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
+xgb_bm_I <- xgb_data(true_split_I, part_split_I)
+# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
+
 ```
 
 Testing with the first benchmark set.
@@ -475,130 +488,6 @@ new_param <- expand.grid(
 new_param <- new_param %>%
   mutate(!!! param)
 ```
-
-
-1) Benchmark 1
-```{r}
-# Perform xgboost cv and extract minimum test MSE mean from each xgbcv
-xgbcv_result1 <- perform_cv(new_param, xgb_bm1)
-
-#### row/list number of the best xgbcv
-best_xgbcv <- which.min(xgbcv_result1[,1])
-best_param <- new_param[best_xgbcv,]
-
-# train on partitioned set
-tr_test1 <- xgb.train(params = best_param, data = xgb_bm1[[3]], nrounds =xgbcv_result1[best_xgbcv,2])
-pred_test1 <- predict(tr_test1, xgb_bm1[[4]])
-
-# Do a check to see what is a good cut-off
-check <- part_split1[[2]] %>% mutate(Signal_pred = pred_test1, Signal = as.factor(Signal))
-distribution(check, "Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV - Preliminary")
-check <- assign_label(check, 0.6)
-confusionMatrix(table(check$Signal_pred, check$Signal))
-rm(check)
-
-# train on original training set
-tr_xgb1 <- xgb.train(params = best_param, 
-          data = xgb_bm1[[1]], nrounds = xgbcv_result1[best_xgbcv,2])
-
-# test error after prediction
-xgbpred1 <- predict(tr_xgb1, xgb_bm1[[2]])
-
-
-check_data1 <- true_split1[[2]] %>% mutate(Signal_pred = xgbpred1, Signal = as.factor(Signal))
-distribution(check_data1, "Distribution of predicted events with $\\tilde{t}=1.2$ TeV and $\\tilde{\\chi}_1^0=600$ GeV") # CANNOT RUN WHEN PLOTLY IS LOADED
-
-# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-check_data1 <- assign_label(check_data1, 0.6)
-confusionMatrix(table(check_data1$Signal_pred, check_data1$Signal))
-# First was 0.920, then increased by 0.001 after a few tries testing the alpha ranges
-
-# Get relevant values off the outcome
-b1_vals <- Values(check_data1$Signal_pred, true_split1, Data_Benchmark01, 0.1593)
-b1_vals
-```
-
-
-Visualisation using guided tours
-```{r}
-var1 <- true_split1[[2]] %>% mutate(Signal_pred = xgbpred1) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split1[[2]])/10)
-var1 <- assign_label(var1, 0.6)
-
-col_v1 <- group_color(var1)
-var1[col_v1[,1]!=col_v1[,2],"Signal_pred"] <- if_else(col_v1[col_v1[,1]!=col_v1[,2],1]=="black", 2, 3)  
-# False positive = Green/2 and False negative = red/3
-write_csv(as.data.frame(var1), "/home/user1/Desktop/var1.csv")
-
-# Rescale
-var1 <- rescale(var1[,-9]) 
-
-# Save tour history
-seed <- .Random.seed
-#.Random.seed <- seed
-t1 <- save_history(var1[,-9], guided_tour(ashapetour(cl = col_v1[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(var1[,-9], planned_tour(t1), col = col_v1[,3], fps = 50)
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation(t1, "/home/user1/Desktop/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/tourr/bm1.html")
-
-# Save the tour plot
-render(var1[,-9], planned_tour(t1), display_xy(col = col_v1[,3]), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm1/bm1_test-%03d.png")
-# pdf version actually captures the whole path
-
-# Reorder the data in increasing order (TN → TP → FP → FN) of Signal_pred variable 
-# with order(as.data.frame(var1)$Signal_pred, decreasing = FALSE)
-```
-
-```{r}
-# tour for only the misclassified points
-false1 <- read_csv("/home/user1/Desktop/var1.csv")
-false1 <- subset(false1, col_v1[,1]!=col_v1[,2])
-
-col_f1 <- if_else(false1$Signal_pred=="2", "blue", "red") # red is FN, blue is FP
-write_csv(as.data.frame(false1), "/home/user1/Desktop/false1.csv")
-false1 <- rescale(select(false1, -"Signal"))
-
-f1 <- save_history(false1[,-ncol(false1)], guided_tour(ashapetour(cl = col_f1, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(false1[,-ncol(false1)], planned_tour(f1), col = col_test, fps = 50)
-X11()
-
-animation_falseVar(false1, "/home/user1/Desktop/false1.csv", f1)
-```
-
-For the training set
-```{r}
-var1_tr <- true_split1[[1]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Signal") %>% sample_n(NROW(true_split1[[1]])/10)
-
-col_v1_tr <- if_else(var1_tr$Signal==0, "black", "blue")
-write_csv(as.data.frame(var1_tr), "/home/user1/Desktop/var1_tr.csv")
-# Rescale
-var1_tr <- rescale(var1_tr[,-9]) 
-
-# Use same tour history as the test set
-X11()
-animate_xy(var1_tr, planned_tour(t1_tr), col = col_v1_tr, fps = 50)
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation_tr(t1_tr, "/home/user1/Desktop/var1_tr.csv", var1_tr)), "/home/user1/Desktop/Images for thesis/tourr/bm1_tr.html")
-
-# Save the tour plot
-render(var1_tr, planned_tour(t1_tr), display_xy(col = col_v1_tr), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm1/bm1_tr1-%03d.png")
-# pdf version actually captures the whole path
-```
-
-Using the spinebil function to see how the index performs
-```{r}
-m <- list(basisMatrix(5,6,10), basisMatrix(3,4,10))
-indexList <- list(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue")))
-indexLabels <- list("alpha")
-trace <- getTrace(var1[,-11], m, indexList, indexLabels)
-plotTrace(trace)
-```
-
 
 Using the h2o version to see if it doesn't crash...
 ```{r}
@@ -711,213 +600,6 @@ confusionMatrix(table(Preds$predict, true_test[1:length(Preds$predict),37]))
 
 ```
 
-This section onwards follows from above, but with the other benchmark 
-
-Checking how other benchmarks' classifier perform.
-```{r}
-tr_test2 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm2[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
-pred_test2 <- predict(tr_test2, xgb_bm2[[2]])
-for (i in 1:NROW(pred_test2)){
-  if (pred_test2[i] > 0.6){
-       pred_test2[i] = 1
-     } else {
-       pred_test2[i] = 0
-     }
-}
-confusionMatrix(table(pred_test2, true_split2[[2]]$Signal))
-# Preliminary results show around 0.935
-######################################################################################################################################
-
-tr_test3 <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm3[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
-pred_test3 <- predict(tr_test3, xgb_bm3[[2]])
-for (i in 1:NROW(pred_test3)){
-  if (pred_test3[i] > 0.6){
-       pred_test3[i] = 1
-     } else {
-       pred_test3[i] = 0
-     }
-}
-confusionMatrix(table(pred_test3, true_split3[[2]]$Signal))
-# Preliminary results show around 0.945
-```
-
-2) Benchmark 2 ($\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV)
-```{r, message = False}
-# Perform xgboost cv and extract minimum test MSE mean from each xgbcv
-xgbcv_result2 <- perform_cv(new_param, xgb_bm2)
-
-# row/list number of the best xgbcv
-best_xgbcv <- which.min(xgbcv_result2[,1])
-best_param <- new_param[best_xgbcv,]
-
-# train on partitioned set
-tr_test2 <- xgb.train(params = best_param, data = xgb_bm2[[3]], nrounds = xgbcv_result2[best_xgbcv,2])
-pred_test2 <- predict(tr_test2, xgb_bm2[[4]])
-
-# Do a check to see what is a good cut-off
-check <- part_split2[[2]] %>% mutate(Signal_pred = pred_test2, Signal = as.factor(Signal))
-distribution(check, "Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV - Preliminary")
-check <- assign_label(check, 0.5)
-confusionMatrix(table(check$Signal_pred, check$Signal)) # Showed about 0.942
-rm(check)
-
-# train on original training set
-tr_xgb2 <- xgb.train(params = best_param, 
-          data = xgb_bm2[[1]], nrounds = xgbcv_result2[best_xgbcv,2])
-
-# test error after prediction
-xgbpred2 <- predict(tr_xgb2, xgb_bm2[[2]])
-
-check_data2 <- true_split2[[2]] %>% mutate(Signal_pred = xgbpred2, Signal = as.factor(Signal))
-distribution(check_data2, "Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $\\tilde{\\chi}_1^0 = 400 $ GeV")
-# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-check_data2 <- assign_label(check_data2, 0.6)
-confusionMatrix(table(check_data2$Signal_pred, check_data2$Signal)) # Cut-off at 0.5 showed about the same (0.942)
-
-b2_vals <- Values(check_data2$Signal_pred, true_split2, Data_Benchmark02, 2.877)
-b2_vals
-```
-
-Visualization with a guided tour
-```{r}
-var2 <- true_split2[[2]] %>% mutate(Signal_pred = xgbpred2) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split2[[2]])/10)
-var2 <- assign_label(var2, 0.6)
-
-col_v2 <- group_color(var2)
-var2[col_v2[,1]!=col_v2[,2],"Signal_pred"] <- if_else(col_v2[col_v2[,1]!=col_v2[,2],1]=="black", 2, 3)  
-# False positive = Green/2 and False negative = red/3
-write_csv(as.data.frame(var2), "/home/user1/Desktop/var2.csv")
-
-# Rescale
-var2 <- rescale(var2[,-6])
-
-# Save tour history
-#seed <- .Random.seed
-.Random.seed <- seed
-t2 <- save_history(var2[,-6], guided_tour(ashapetour(cl = col_v2[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(var2[,-6], planned_tour(t2), col = col_v2[,3], fps = 50, axes = "bottomleft") 
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation(t2, "/home/user1/Desktop/var2.csv", var2)), "/home/user1/Desktop/Images for thesis/tourr/bm2.html")
-
-# Save the tour plot
-render(var2[,-6], planned_tour(t2), display_xy(col = col_v2), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm2/bm2_3-%03d.png")
-# pdf version actually captures the whole path
-```
-
-For the entire training set
-```{r}
-var2_tr <- true_split2[[1]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal") %>% sample_n(NROW(true_split2[[1]])/10)
-
-col_v2_tr <- if_else(var2_tr$Signal==0, "black", "blue")
-write_csv(as.data.frame(var2_tr), "/home/user1/Desktop/var2_tr.csv")
-# Rescale
-var2_tr <- rescale(var2_tr[,-6])
-
-# Save tour history
-t2_tr <- save_history(var2_tr, guided_tour(ashapetour(cl = col_v2_tr, alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(var2_tr, planned_tour(t2_tr), col = col_v2_tr, fps = 50)
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation_tr(t2_tr, "/home/user1/Desktop/var2_tr.csv", var2_tr)), "/home/user1/Desktop/Images for thesis/tourr/bm2_tr.html")
-
-# Save the tour plot
-render(var2_tr, planned_tour(t2_tr), display_xy(col = col_v2_tr), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm2/bm2_tr1-%03d.png")
-# pdf version actually captures the whole path
-```
-
-3) Benchmark 3 ($\tilde{t} = 1.25$ TeV and $\tilde{\chi}_1^0 = 100$ GeV)
-```{r, message = False}
-xgbcv_result3 <- perform_cv(new_param, xgb_bm3)
-# row/list number of the best xgbcv
-best_xgbcv <- which.min(xgbcv_result3[,1])
-best_param <- new_param[best_xgbcv,]
-
-# train on partitioned set
-tr_test3 <- xgb.train(params = best_param, data = xgb_bm3[[3]], nrounds = xgbcv_result3[best_xgbcv,2])
-pred_test3 <- predict(tr_test3, xgb_bm3[[4]])
-
-# Do a check to see what is a good cut-off
-check <- part_split3[[2]] %>% mutate(Signal_pred = pred_test3, Signal = as.factor(Signal))
-distribution(check, "Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $\\tilde{\chi}_1^0 = 400$ GeV - Preliminary")
-check <- assign_label(check, 0.6)
-confusionMatrix(table(check$Signal_pred, check$Signal)) # Showed 0.9494 accuracy
-rm(check)
-
-# train on original training set
-tr_xgb3 <- xgb.train(params = best_param, 
-          data = xgb_bm3[[1]], nrounds = xgbcv_result3[best_xgbcv,2])
-
-# test error after prediction
-xgbpred3 <- predict(tr_xgb3, xgb_bm3[[2]])
-
-check_data3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3, Signal = as.factor(Signal))
-distribution(check_data3, "Distribution of predicted events with $\\tilde{t} = 1.25$ TeV and $\\tilde{\\chi}_1^0 = 100$ GeV")
-
-# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-check_data3 <- assign_label(check_data3, 0.6)
-
-confusionMatrix(table(check_data3$Signal_pred, check_data3$Signal)) # Showed an improvement to 0.9503
-
-b3_vals <- Values(check_data3$Signal_pred, true_split3, Data_Benchmark03, 0.6571)
-b3_vals
-```
-
-Visualisation using tourr
-```{r}
-var3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split3[[2]])/10)
-var3 <- assign_label(var3, 0.6)
-#write_csv(var1, "/home/user1/Desktop/var1.csv")
-col_v3 <- group_color(var3)   
-var3[col_v3[,1]!=col_v3[,2],"Signal_pred"] <- if_else(col_v3[col_v3[,1]!=col_v3[,2],1]=="black", 2, 3)  
-# False positive = Green/2 and False negative = red/3
-write_csv(as.data.frame(var3), "/home/user1/Desktop/var3.csv")
-
-# Rescale
-var3 <- rescale(var3[,-6])
-
-# Save tour history
-oldseed <- .Random.seed
-t3 <- save_history(var3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),-6], guided_tour(ashapetour(cl = col_v3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(var3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),-6], planned_tour(t3), col = col_v3[order(as.data.frame(var3)$Signal_pred, decreasing = FALSE),3], fps = 50)
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation(t3, "/home/user1/Desktop/var3.csv", var3)), "/home/user1/Desktop/Images for thesis/tourr/bm3_test.html")
-
-# Save the tour plot  
-render(var3[,-6], planned_tour(t3), display_xy(col = col_v3), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm3/3/bm3_3-%03d.png")
-# pdf version actually captures the whole path
-```
-
-For the training set
-```{r}
-var3_tr <- true_split3[[1]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal") %>% sample_n(NROW(true_split3[[1]])/10)
-
-col_v3_tr <- if_else(var3_tr$Signal==0, "black", "blue")
-write_csv(as.data.frame(var3_tr), "/home/user1/Desktop/var3_tr.csv")
-# Rescale
-var3_tr <- rescale(var3_tr[,-6])
-
-# Save tour history
-t3_tr <- save_history(var3_tr, guided_tour(ashapetour(cl = col_v3_tr, alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(var3_tr, planned_tour(t3), col = col_v3_tr, fps = 50)
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation_tr(t3, "/home/user1/Desktop/var3_tr.csv", var3_tr)), "/home/user1/Desktop/Images for thesis/tourr/bm3_test_tr.html")
-
-# Save the tour plot
-render(var3_tr, planned_tour(t3_tr), display_xy(col = col_v3_tr), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm2/bm2_tr1-%03d.png")
-# pdf version actually captures the whole path
-```
-
 
 Create ROC curves based on the test models.
 ```{r}
@@ -947,129 +629,13 @@ xgb.ggplot.importance(xgb.importance(model = tr_xgb2), top_n = 10)
 xgb.ggplot.importance(xgb.importance(model = tr_xgb3), top_n = 10)
 ```
 
-
-This is to do a check with masses $ \tilde{t}= 750 \text{GeV}, \chi_1^0 = 1 \text{GeV} $. 
-```{r, message = F}
-# Load the data of interest
-stop <- read.delim(file = "/home/user1/Desktop/Root files/inside_750GeV.txt", sep = ",") 
-stop$Signal <-  rep(1,nrow(stop))
-
-Data_Inside <- make_data(stop, topData)
-true_split_I <- true_partition(Data_Inside)
-part_split_I <- part_partition(true_split_I[[1]])
-rm(stop)
-
-xgb_bm_I <- xgb_data(true_split_I, part_split_I)
-# 1 is true_train, 2 is true_test, 3 is part_train, 4 is part_test
-
-tr_test_I <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_bm_I[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
-pred_test_I <- predict(tr_test_I, xgb_bm_I[[2]])
-for (i in 1:NROW(pred_test_I)){
-  if (pred_test_I[i] > 0.6){
-       pred_test_I[i] = 1
-     } else {
-       pred_test_I[i] = 0
-     }
-}
-      
-confusionMatrix(table(pred_test_I, true_split_I[[2]]$Signal))
-# Initial values below 90% - 0.89
-```
-
-```{r, message = False}
-xgbcv_result_I <- perform_cv(new_param, xgb_bm_I)
-# row/list number of the best xgbcv
-best_xgbcv <- which.min(xgbcv_result_I[,1])
-best_param <- new_param[best_xgbcv,]
-
-# train on partitioned set
-tr_test_I <- xgb.train(params = best_param, data = xgb_bm_I[[3]], nrounds = xgbcv_result_I[best_xgbcv,2])
-pred_test_I <- predict(tr_test_I, xgb_bm_I[[4]])
-
-# Do a check to see what is a good cut-off
-check <- part_split_I[[2]] %>% mutate(Signal_pred = pred_test_I, Signal = as.factor(Signal))
-distribution(check, "Distribution of predicted events with $\\tilde{t} = 750$ GeV and $\\tilde{\\chi} = 1 $ GeV - Preliminary")
-check <- assign_label(check, 0.6)
-confusionMatrix(table(check$Signal_pred, check$Signal)) # Showed 0.9494 accuracy
-rm(check)
-
-# train on original training set
-tr_xgb_I <- xgb.train(params = best_param, 
-          data = xgb_bm_I[[1]], nrounds = xgbcv_result_I[best_xgbcv,2])
-
-# test error after prediction
-xgbpred_I <- predict(tr_xgb_I, xgb_bm_I[[2]])
-
-check_data_I <- true_split_I[[2]] %>% mutate(Signal_pred = xgbpred_I, Signal = as.factor(Signal))
-distribution(check_data_I, "Distribution of predicted events with $\\tilde{t} = 750$ GeV and $\\tilde{\\chi}_1^0 = 1 $ GeV")
-
-# Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-check_data_I <- assign_label(check_data_I, 0.6)
-
-confusionMatrix(table(check_data_I$Signal_pred, check_data_I$Signal)) # Showed an improvement to 0.9503
-
-In_vals <- Values(check_data_I$Signal_pred, true_split_I, Data_Inside, 4.001)
-In_vals
-```
-
+Using the spinebil function to see how the index performs
 ```{r}
-par(pty = "s")
-roc(true_split_I[[2]]$Signal, pred_test_I, 
-    plot = TRUE, smoothed = TRUE, legacy.axes = TRUE, percent = TRUE, 
-    xlab = "False Positive Rate (FPR)", ylab = "True Positive Rate (TPR)", col = "blue3",
-    ci = TRUE, ci.alpha = 0.9, stratified = FALSE,
-    auc = TRUE, grid=TRUE, print.auc=TRUE, print.auc.x = 70, print.auc.y = 55, show.thres=TRUE)
-
-xgb.ggplot.importance(xgb.importance(model = tr_xgb_I), top_n = 10)
-```
-
-```{r}
-var_I <- true_split_I[[2]] %>% mutate(Signal_pred = xgbpred_I) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "BJet.PT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split_I[[2]])/10)
-var_I <- assign_label(var_I, 0.6)
-
-col_I <- group_color(var_I)   
-var_I[col_I[,1]!=col_I[,2],"Signal_pred"] <- if_else(col_I[col_I[,1]!=col_I[,2],1]=="black", 2, 3)  
-# False positive = Green/2 and False negative = red/3 
-write_csv(var_I, "/home/user1/Desktop/var_I.csv")
-
-# Rescale
-var_I <- rescale(var_I[,-8])
-
-# Save tour history
-t_I <- save_history(var_I[,-8], guided_tour(ashapetour(cl = col_I[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(var_I[,-8], planned_tour(t_I), col = col_I[,3], fps = 50)
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation(t_I, "/home/user1/Desktop/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/tourr/bm_I.html")
-
-# Save the tour plot
-render(var_I[,-8], planned_tour(t_I), display_xy(col = col_I), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm_I/3//bm_I_3-%03d.png")
-# pdf version actually captures the whole path
-```
-
-For the training set
-```{r}
-var_I_tr <- true_split_I[[1]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "BJet.PT", "Signal") %>% sample_n(NROW(true_split_I[[1]])/10)
-
-col_v_I_tr <- if_else(var_I_tr$Signal==0, "black", "blue")
-write_csv(as.data.frame(var_I_tr), "/home/user1/Desktop/var_I_tr.csv")
-# Rescale
-var_I_tr <- rescale(var_I_tr[,-8]) 
-
-# Save tour history
-t_I_tr <- save_history(var_I_tr, guided_tour(ashapetour(cl = col_v_I_tr, alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
-
-X11()
-animate_xy(var_I_tr, planned_tour(t_I_tr), col = col_v_I_tr, fps = 50)
-X11()
-
-htmlwidgets::saveWidget(as_widget(create_animation_tr(t_I_tr, "/home/user1/Desktop/var_I_tr.csv", var_I_tr)), "/home/user1/Desktop/Images for thesis/tourr/bm_I_tr.html")
-
-# Save the tour plot
-render(var1_tr, planned_tour(t_I_tr), display_xy(col = col_v_I_tr), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm_I/bm_I_tr1-%03d.png")
-# pdf version actually captures the whole path
+m <- list(basisMatrix(5,6,10), basisMatrix(3,4,10))
+indexList <- list(ashapetour(cl = col1, alpha = 0.4, hull_var = c("blue")))
+indexLabels <- list("alpha")
+trace <- getTrace(var1[,-11], m, indexList, indexLabels)
+plotTrace(trace)
 ```
 
 
@@ -1173,17 +739,3 @@ for (d in all_dir){
 ```
 
 
-```{r}
-Benchmarks <- c("Outside_1", "Outside_2", "Outside_3", "Inside")
-Stop_Mass <- c(1.275, 1.25, 1.225, 0.75)
-Chi_Mass <- c(600, 400, 100, 1)
-table1 <- cbind(Benchmarks, Stop_Mass, Chi_Mass)
-colnames(table1) <- c("Model", "Stop Mass (TeV)", "Neutralino Mass (GeV)")
-
-kable(table1, "latex", caption = "Chosen parameters for building classifiers", booktabs = T, linesep = "") %>%
-kable_styling(latex_options = c("striped", "hold_position"))
-```
-
-```{r}
-animation_FPFN(f1, "/home/user1/Desktop/false1.csv", false1)
-```
