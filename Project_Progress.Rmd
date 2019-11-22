@@ -329,6 +329,16 @@ group_color <- function(variables){
 ```
 
 
+
+
+
+## THIS IS TO NOT KEEP PROGRESS, BUT TO PERFORM TESTS ETC ON FROM NOW 22/11/2019 ##
+
+
+
+
+
+
 This section of code obtains the full set of data by data wrangling for the signal (stops) and background (tops).
 
 1) Stop benchmark 1 $ \tilde{t}= \text{TeV}, \chi_1^0 = \text{GeV} $. 

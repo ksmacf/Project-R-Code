@@ -77,7 +77,7 @@ var1 <- assign_label(var1, 0.6)
 col_v1 <- group_color(var1)
 var1[col_v1[,1]!=col_v1[,2],"Signal_pred"] <- if_else(col_v1[col_v1[,1]!=col_v1[,2],1]=="black", 2, 3)  
 # False positive = Green/2 and False negative = red/3
-write_csv(as.data.frame(var1), "/home/user1/Desktop/var1.csv")
+write_csv(as.data.frame(var1), "/home/user1/Desktop/tourr variables/var1.csv")
 
 # Rescale
 var1 <- rescale(var1[,-9]) 
@@ -91,7 +91,7 @@ X11()
 animate_xy(var1[,-9], planned_tour(t1), col = col_v1[,3], fps = 50)
 X11()
 
-htmlwidgets::saveWidget(as_widget(create_animation(t1, "/home/user1/Desktop/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/tourr/bm1.html")
+htmlwidgets::saveWidget(as_widget(create_animation(t1, "/home/user1/Desktop/tourr variables/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/tourr/plotly animation/bm1.html")
 
 # Save the tour plot
 render(var1[,-9], planned_tour(t1), display_xy(col = col_v1[,3]), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm1/bm1_test-%03d.png")
@@ -106,7 +106,7 @@ For the training set
 var1_tr <- true_split1[[1]] %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "MissingET.Eta", "BJet.PT", "Signal") %>% sample_n(NROW(true_split1[[1]])/10)
 
 col_v1_tr <- if_else(var1_tr$Signal==0, "black", "blue")
-write_csv(as.data.frame(var1_tr), "/home/user1/Desktop/var1_tr.csv")
+write_csv(as.data.frame(var1_tr), "/home/user1/Desktop/tourr variables/var1_tr.csv")
 # Rescale
 var1_tr <- rescale(var1_tr[,-9]) 
 
@@ -115,21 +115,20 @@ X11()
 animate_xy(var1_tr, planned_tour(t1_tr), col = col_v1_tr, fps = 50)
 X11()
 
-htmlwidgets::saveWidget(as_widget(create_animation_tr(t1_tr, "/home/user1/Desktop/var1_tr.csv", var1_tr)), "/home/user1/Desktop/Images for thesis/tourr/bm1_tr.html")
+htmlwidgets::saveWidget(as_widget(create_animation_tr(t1_tr, "/home/user1/Desktop/tourr variables/var1_tr.csv", var1_tr)), "/home/user1/Desktop/Images for thesis/plotly animation/tourr/bm1_tr.html")
 
 # Save the tour plot
 render(var1_tr, planned_tour(t1_tr), display_xy(col = col_v1_tr), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm1/bm1_tr1-%03d.png")
 # pdf version actually captures the whole path
 ```
 
-
+Only the misclassified points
 ```{r}
-# tour for only the misclassified points
-false1 <- read_csv("/home/user1/Desktop/var1.csv")
+false1 <- read_csv("/home/user1/Desktop/tourr variables/var1.csv")
 false1 <- subset(false1, col_v1[,1]!=col_v1[,2])
 
 col_f1 <- if_else(false1$Signal_pred=="2", "red", "blue") # blue is FN, red is FP
-write_csv(as.data.frame(false1), "/home/user1/Desktop/false1.csv")
+write_csv(as.data.frame(false1), "/home/user1/Desktop/tourr variables/false1.csv")
 false1 <- rescale(select(false1, -"Signal"))
 
 f1 <- save_history(false1[,-ncol(false1)], guided_tour(ashapetour(cl = col_f1, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
@@ -138,5 +137,50 @@ X11()
 animate_xy(false1[,-ncol(false1)], planned_tour(f1), col = col_f1, fps = 50)
 X11()
 
-animation_FPFN(f1, "/home/user1/Desktop/false1.csv", false1)
+animation_FPFN(f1, "/home/user1/Desktop/tourr variables/false1.csv", false1)
+```
+
+Only for the signal points
+```{r}
+fntp1 <- read_csv("/home/user1/Desktop/tourr variables/var1.csv")
+fntp1 <- subset(fntp1, fntp1[,"Signal"]=="1")
+write_csv(as.data.frame(fntp1), "/home/user1/Desktop/tourr variables/fntp1.csv")
+col_sig1 <- if_else(fntp1$Signal_pred=="3", "red", "blue") # blue is TP, red is FN
+fntp1 <- rescale(select(fntp1, -"Signal"))
+
+sig1 <- save_history(fntp1[,-ncol(fntp1)], guided_tour(ashapetour(cl = col_sig1, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+
+X11()
+animate_xy(fntp1[,-ncol(fntp1)], planned_tour(sig1), col = col_sig1, fps = 50)
+X11()
+
+animation_signal(sig1, "/home/user1/Desktop/tourr variables/fntp1.csv", fntp1)
+```
+
+Only for the background points
+```{r}
+fptn1 <- read_csv("/home/user1/Desktop/tourr variables/var1.csv")
+fptn1 <- subset(fptn1, fptn1[,"Signal"]=="0")
+write_csv(as.data.frame(fptn1), "/home/user1/Desktop/tourr variables/fptn1.csv")
+col_back1 <- if_else(fptn1$Signal_pred=="2", "red", "blue") # blue is TN, red is FP
+fptn1 <- rescale(select(fptn1, -"Signal"))
+
+back1 <- save_history(fptn1[,-ncol(fptn1)], guided_tour(ashapetour(cl = col_back1, alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+
+X11()
+animate_xy(fptn1[,-ncol(fptn1)], planned_tour(back1), col = col_back1, fps = 50)
+X11()
+
+animation_background(back3, "/home/user1/Desktop/tourr variables/fptn1.csv", fptn1)
+```
+
+Create a gif
+```{r}
+all_dir <- list.dirs(path = "/home/user1/Desktop/Images for thesis/tourr/bm1/test", recursive = TRUE)
+# change end of file according to the folder I want to create gifs with
+for (d in all_dir){
+  name <- paste0("/home/user1/Desktop/Images for thesis/tourr", "/bm1_test.gif") # change pasted name to match the run number
+  fls <- list.files(d, full.names = TRUE)
+  gifski(fls , name, loop = FALSE)
+}
 ```
