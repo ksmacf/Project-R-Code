@@ -48,12 +48,12 @@ create_animation <- function(bases, filename, variable){
                size=1, alpha = 0.75) + # change alpha to change transparency of points
     scale_colour_manual(values = c("red", "green", "black", "blue")) +
     theme_void() +
-    coord_fixed() +
-    theme(legend.position="right")
+    coord_fixed() #+
+    #theme(legend.position="left")
   
   pg <- ggplotly(p) %>%
     animation_opts(150, redraw = FALSE, transition=0) %>%
-    layout(showlegend = T, yaxis = list(showgrid = F, showline = F),
+    layout(legend = list(orientation = "h", xanchor="center", x=0.5, y = 0.01), yaxis = list(showgrid = F, showline = F),
            xaxis = list(scaleanchor = "y", scaleratio = 1, showgrid = F, showline =F))
   pg
   

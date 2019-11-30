@@ -44,14 +44,14 @@ animation_FPFN <- function(bases, filename, variable){
     geom_point(data = df, 
                aes(x = d1, y = d2, colour=Prediction, text=paste("Event Number:", df$Event_Number)), 
                size=1, alpha = 1) + # change alpha to change transparency of points
-    scale_colour_manual(values = c("blue", "red")) +
+    scale_colour_manual(values = c("red", "blue")) +
     theme_void() +
     coord_fixed() +
     theme(legend.position="right")
   
   pg <- ggplotly(p) %>%
     animation_opts(150, redraw = FALSE, transition=0) %>%
-    layout(showlegend = T, yaxis = list(showgrid = F, showline = F),
+    layout(legend = list(orientation = "h", xanchor="center", x=0.5, y = 0.01), yaxis = list(showgrid = F, showline = F),
            xaxis = list(scaleanchor = "y", scaleratio = 1, showgrid = F, showline =F))
   pg
   

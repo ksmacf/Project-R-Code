@@ -24,6 +24,12 @@ for (i in 1:NROW(pred_test1)){
 }
 
 confusionMatrix(table(pred_test1, true_split1[[2]]$Signal))
+
+true_split1[[1]] <- true_split1[[1]][,Variables]
+true_split1[[2]] <- true_split1[[2]][,Variables]
+part_split1[[1]] <- part_split1[[1]][,Variables]
+part_split1[[2]] <- part_split1[[2]][,Variables]
+
 ```
 
 
@@ -43,7 +49,7 @@ pred_test1 <- predict(tr_test1, xgb_bm1[[4]])
 # Do a check to see what is a good cut-off
 check <- part_split1[[2]] %>% mutate(Signal_pred = pred_test1, Signal = as.factor(Signal))
 distribution(check, "Distribution of predicted events with $\\tilde{t} = 1.2$ TeV and $ \\chi_1^0 = 600 $ GeV - Preliminary")
-check <- assign_label(check, 0.6)
+check <- assign_label(check, 0.75)
 confusionMatrix(table(check$Signal_pred, check$Signal))
 rm(check)
 
@@ -59,7 +65,7 @@ check_data1 <- true_split1[[2]] %>% mutate(Signal_pred = xgbpred1, Signal = as.f
 distribution(check_data1, "Distribution of predicted events with $\\tilde{t}=1.2$ TeV and $\\tilde{\\chi}_1^0=600$ GeV") # CANNOT RUN WHEN PLOTLY IS LOADED
 
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-check_data1 <- assign_label(check_data1, 0.6)
+check_data1 <- assign_label(check_data1, 0.75)
 confusionMatrix(table(check_data1$Signal_pred, check_data1$Signal))
 # First was 0.920, then increased by 0.001 after a few tries testing the alpha ranges
 
@@ -85,13 +91,15 @@ var1 <- rescale(var1[,-9])
 # Save tour history
 seed <- .Random.seed
 #.Random.seed <- seed
-t1 <- save_history(var1[,-9], guided_tour(ashapetour(cl = col_v1[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+t1 <- save_history(var1[,-9], guided_tour(ashapetour(cl = col_v1[,3], alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
 X11()
 animate_xy(var1[,-9], planned_tour(t1), col = col_v1[,3], fps = 50)
 X11()
 
-htmlwidgets::saveWidget(as_widget(create_animation(t1, "/home/user1/Desktop/tourr variables/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/tourr/plotly animation/bm1.html")
+htmlwidgets::saveWidget(as_widget(create_animation(t1, "/home/user1/Desktop/tourr variables/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/plotly animation/bm1.html")
+
+htmlwidgets::saveWidget(as_widget(animation_highlighted(t1, "/home/user1/Desktop/tourr variables/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/plotly animation/bm1_highlighted.html")
 
 # Save the tour plot
 render(var1[,-9], planned_tour(t1), display_xy(col = col_v1[,3]), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm1/bm1_test-%03d.png")
@@ -137,7 +145,8 @@ X11()
 animate_xy(false1[,-ncol(false1)], planned_tour(f1), col = col_f1, fps = 50)
 X11()
 
-animation_FPFN(f1, "/home/user1/Desktop/tourr variables/false1.csv", false1)
+htmlwidgets::saveWidget(as_widget(animation_FPFN(f1, "/home/user1/Desktop/tourr variables/false1.csv", false1)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn1.html")
+
 ```
 
 Only for the signal points
@@ -154,7 +163,8 @@ X11()
 animate_xy(fntp1[,-ncol(fntp1)], planned_tour(sig1), col = col_sig1, fps = 50)
 X11()
 
-animation_signal(sig1, "/home/user1/Desktop/tourr variables/fntp1.csv", fntp1)
+htmlwidgets::saveWidget(as_widget(animation_signal(sig1, "/home/user1/Desktop/tourr variables/fntp1.csv", fntp1)), "/home/user1/Desktop/Images for thesis/plotly animation/fntp1.html")
+
 ```
 
 Only for the background points
@@ -171,7 +181,8 @@ X11()
 animate_xy(fptn1[,-ncol(fptn1)], planned_tour(back1), col = col_back1, fps = 50)
 X11()
 
-animation_background(back3, "/home/user1/Desktop/tourr variables/fptn1.csv", fptn1)
+htmlwidgets::saveWidget(as_widget(animation_background(back1, "/home/user1/Desktop/tourr variables/fptn1.csv", fptn1)), "/home/user1/Desktop/Images for thesis/plotly animation/fptn1.html")
+
 ```
 
 Create a gif

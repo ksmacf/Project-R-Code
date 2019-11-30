@@ -23,6 +23,11 @@ for (i in 1:NROW(pred_test_I)){
       
 confusionMatrix(table(pred_test_I, true_split_I[[2]]$Signal))
 # Initial values below 90% - 0.89
+true_split_I[[1]] <- true_split_I[[1]][,Variables]
+true_split_I[[2]] <- true_split_I[[2]][,Variables]
+part_split_I[[1]] <- part_split_I[[1]][,Variables]
+part_split_I[[2]] <- part_split_I[[2]][,Variables]
+
 ```
 
 ```{r, message = False}
@@ -53,14 +58,14 @@ check_data_I <- true_split_I[[2]] %>% mutate(Signal_pred = xgbpred_I, Signal = a
 distribution(check_data_I, "Distribution of predicted events with $\\tilde{t} = 750$ GeV and $\\tilde{\\chi}_1^0 = 1 $ GeV")
 
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-check_data_I <- assign_label(check_data_I, 0.6)
+check_data_I <- assign_label(check_data_I, 0.75)
 
 confusionMatrix(table(check_data_I$Signal_pred, check_data_I$Signal)) # Showed an improvement to 0.9503
 
 In_vals <- Values(check_data_I$Signal_pred, true_split_I, Data_Inside, 4.001)
 In_vals
 ```
-
+  
 ```{r}
 par(pty = "s")
 roc(true_split_I[[2]]$Signal, pred_test_I, 
@@ -90,11 +95,13 @@ t_I <- save_history(var_I[,-8], guided_tour(ashapetour(cl = col_I[,3], alpha = 0
 X11()
 animate_xy(var_I[,-8], planned_tour(t_I), col = col_I[,3], fps = 50)
 X11()
+  
+htmlwidgets::saveWidget(as_widget(create_animation(t_I, "/home/user1/Desktop/tourr variables/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/plotly animation/bm_I.html")
 
-htmlwidgets::saveWidget(as_widget(create_animation(t_I, "/home/user1/Desktop/tourr variables/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/tourr/plotly animation/bm_I.html")
+htmlwidgets::saveWidget(as_widget(animation_highlighted(t_I, "/home/user1/Desktop/tourr variables/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/plotly animation/bm_I_highlighted.html")
 
 # Save the tour plot
-render(var_I[,-8], planned_tour(t_I), display_xy(col = col_I), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm_I/3//bm_I_3-%03d.png")
+render(var_I[,-8], planned_tour(t_I), display_xy(col = col_I[,3]), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm_I/proper/bm_I_proper-%03d.png")
 # pdf version actually captures the whole path
 ```
 
@@ -125,7 +132,7 @@ render(var1_tr, planned_tour(t_I_tr), display_xy(col = col_v_I_tr), frames = 50,
 Only the misclassified points
 ```{r}
 false_I <- read_csv("/home/user1/Desktop/tourr variables/var_I.csv")
-false_I <- subset(false_I, col_v_I[,1]!=col_v_I[,2])
+false_I <- subset(false_I, col_I[,1]!=col_I[,2])
 
 col_f_I <- if_else(false_I$Signal_pred=="2", "red", "blue") # blue is FN, red is FP
 write_csv(as.data.frame(false_I), "/home/user1/Desktop/tourr variables/false_I.csv")
@@ -137,7 +144,8 @@ X11()
 animate_xy(false_I[,-ncol(false_I)], planned_tour(f_I), col = col_f_I, fps = 50)
 X11()
 
-animation_FPFN(f_I, "/home/user1/Desktop/tourr variables/false_I.csv", false_I)
+htmlwidgets::saveWidget(as_widget(animation_FPFN(f_I, "/home/user1/Desktop/tourr variables/false_I.csv", false_I)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn_I.html")
+
 ```
 
 Only for the signal points
@@ -154,7 +162,8 @@ X11()
 animate_xy(fntp_I[,-ncol(fntp_I)], planned_tour(sig_I), col = col_sig_I, fps = 50)
 X11()
 
-animation_signal(sig_I, "/home/user1/Desktop/tourr variables/fntp_I.csv", fntp_I)
+htmlwidgets::saveWidget(as_widget(animation_signal(sig_I, "/home/user1/Desktop/tourr variables/fntp_I.csv", fntp_I)), "/home/user1/Desktop/Images for thesis/plotly animation/fntp_I.html")
+
 ```
 
 Only for the background points
@@ -165,22 +174,23 @@ write_csv(as.data.frame(fptn_I), "/home/user1/Desktop/tourr variables/fptn_I.csv
 col_back_I <- if_else(fptn_I$Signal_pred=="2", "red", "blue") # blue is TN, red is FP
 fptn_I <- rescale(select(fptn_I, -"Signal"))
 
-back_I <- save_history(fptn_I[,-ncol(fptn_I)], guided_tour(ashapetour(cl = col_back_I, alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+back_I <- save_history(fptn_I[,-ncol(fptn_I)], guided_tour(ashapetour(cl = col_back_I, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
 X11()
 animate_xy(fptn_I[,-ncol(fptn_I)], planned_tour(back_I), col = col_back_I, fps = 50)
 X11()
 
-animation_background(back_I, "/home/user1/Desktop/tourr variables/fptn_I.csv", fptn_I)
+htmlwidgets::saveWidget(as_widget(animation_background(back_I, "/home/user1/Desktop/tourr variables/fptn_I.csv", fptn_I)), "/home/user1/Desktop/Images for thesis/plotly animation/fptn_I.html")
+
 ```
 
 Create a gif
 ```{r}
-all_dir <- list.dirs(path = "/home/user1/Desktop/Images for thesis/tourr/bm1/test", recursive = TRUE)
-# change end of file according to the folder I want to create gifs with
-for (d in all_dir){
-  name <- paste0("/home/user1/Desktop/Images for thesis/tourr", "/bm1_test.gif") # change pasted name to match the run number
-  fls <- list.files(d, full.names = TRUE)
-  gifski(fls , name, loop = FALSE)
-}
+  all_dir <- list.dirs(path = "/home/user1/Desktop/Images for thesis/tourr/bm_I/proper", recursive = TRUE)
+  # change end of file according to the folder I want to create gifs with
+  for (d in all_dir){
+    name <- paste0("/home/user1/Desktop/Images for thesis/tourr", "/bm_I_proper.gif") # change pasted name to match the run number
+    fls <- list.files(d, full.names = TRUE)
+    gifski(fls , name, loop = TRUE)
+  }
 ```

@@ -49,7 +49,7 @@ create_animation_tr <- function(bases, filename, variable){
     theme(legend.position="right")
   pg <- ggplotly(p) %>%
     animation_opts(150, redraw = FALSE, transition=0) %>%
-    layout(showlegend = T, yaxis = list(showgrid = F, showline = F),
+    layout(legend = list(orientation = "h", xanchor="center", x=0.5, y = 0.01), yaxis = list(showgrid = F, showline = F),
            xaxis = list(scaleanchor = "y", scaleratio = 1, showgrid = F, showline =F))
   pg
 }

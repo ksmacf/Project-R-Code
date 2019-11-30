@@ -30,6 +30,8 @@ library(purrr)
 library(spinebil)
 library(plotly)
 library(varComp)
+library(gifski)
+library(htmlwidgets)
 rm(list = ls(all.names = TRUE))
 load("/home/user1/Desktop/Project-Environment.RData")
 ```
@@ -254,8 +256,28 @@ data_wrangling <- function(data){
                            "Jet.Eta_1", "Jet.Eta_2", "Jet.Eta_3", "Jet.Eta_4",
                            "Jet.DeltaPhi_1", "Jet.DeltaPhi_2", "Jet.DeltaPhi_3", "Jet.DeltaPhi_4",
                            "Jet.DeltaEta_1", "Jet.DeltaEta_2", "Jet.DeltaEta_3", "Jet.DeltaEta_4",
-                           "Jet.BTag_1", "Jet.BTag_2", "Jet.BTag_3", "Jet.BTag_4")
+                           "Jet.BTag_1", "Jet.BTag_2", "Jet.BTag_3", "Jet.BTag_4", 
+                           "BJet.Mass", "Jet1.Mass", "Jet2.Mass", "Jet3.Mass")
   data = data[,Jets]
+  
+  data = data %>% 
+    mutate(
+      BJet.DeltaR = sqrt(data$BJet.DeltaEta^2 + data$BJet.DeltaPhi^2),
+      Jet1.DeltaR = sqrt(data$Jet1.DeltaEta^2 + data$Jet1.DeltaPhi^2),
+      Jet2.DeltaR = sqrt(data$Jet2.DeltaEta^2 + data$Jet2.DeltaPhi^2),
+      Jet3.DeltaR = sqrt(data$Jet3.DeltaEta^2 + data$Jet3.DeltaPhi^2)
+    )
+  
+  irrelevant = !names(data) %in% c("BJet.DeltaEta", "BJet.DeltaPhi", "Jet1.DeltaPhi", "Jet1.DeltaEta",
+                                   "Jet2.DeltaPhi", "Jet2.DeltaEta", "Jet3.DeltaPhi", "Jet3.DeltaEta")
+  data = data[,irrelevant]
+  order = c("MissingET.MET", "MissingET.Eta", "MissingET.Phi", "ScalarHT.HT", 
+            "Lepton.PT", "Lepton.Eta", "Lepton.Phi", "Lepton.Type", 
+            "BJet.PT", "BJet.Phi", "BJet.Eta", "BJet.DeltaR",
+            "Jet1.PT", "Jet1.Phi", "Jet1.Eta", "Jet1.DeltaR",
+            "Jet2.PT", "Jet2.Phi", "Jet2.Eta", "Jet2.DeltaR",
+            "Jet3.PT", "Jet3.Phi", "Jet3.Eta", "Jet3.DeltaR", "Signal")
+  data = data[,order]
   return(data)
 }
 
@@ -290,7 +312,7 @@ distribution <- function(Data, Title){
     geom_histogram(bins = 50, alpha=.5, position="identity") +
     scale_y_continuous(trans = 'log10') +
     labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type") +
-    ggtitle(TeX())
+    ggtitle(TeX(Title))
 }
 
 Values <- function(pred, true, data, stopCS){ # data1 = predicted, data2 = true, data3 = combined data
@@ -299,16 +321,17 @@ Values <- function(pred, true, data, stopCS){ # data1 = predicted, data2 = true,
   confMat = confusionMatrix(table(pred, true[[2]]$Signal))
   
   Ns = round((stopCS*137)*(3*confMat$table[2,2]/(nrow(data)-1000000)))
-  Nb = round((2500*137)*(3*confMat$table[1,2]/1000000))
-  AMS = sqrt(2*(Ns+Nb+10)*log(1+(Ns/(Nb+10)))-Ns)
+  Nb = round((2500*137)*(3*confMat$table[2,1]/1000000))
+  AMS = sqrt(2*((Ns+Nb+10)*log(1+(Ns/(Nb+10)))-Ns))
+  total = confMat$table[1,1]+confMat$table[1,2]+confMat$table[2,1]+confMat$table[2,2]
   
-  Vals[[1]] = c("TP", confMat$table[2,2]/nrow(true[[2]]))
-  Vals[[2]] = c("TN", confMat$table[1,1]/nrow(true[[2]]))
-  Vals[[3]] = c("FP" , confMat$table[1,2]/nrow(true[[2]]))
-  Vals[[4]] = c("FN", confMat$table[2,1]/nrow(true[[2]]))
+  Vals[[1]] = c("TP", confMat$table[2,2]/total)
+  Vals[[2]] = c("TN", confMat$table[1,1]/total)
+  Vals[[3]] = c("FP" , confMat$table[2,1]/total)
+  Vals[[4]] = c("FN", confMat$table[1,2]/total)
   Vals[[5]] = c("Accuracy", confMat$overall[1])
   Vals[[6]] = c("u(Accuracy)", max(confMat$overall[4]-confMat$overall[1], confMat$overall[1]-confMat$overall[3]))
-  Vals[[7]] = c("SNR", confMat$table[2,2]/confMat$table[1,1])
+  Vals[[7]] = c("SNR", Ns/Nb)
   Vals[[8]] = c("Nb", Nb)
   Vals[[9]] = c("Ns", Ns)
   Vals[[10]] = c("AMS", AMS)
@@ -634,7 +657,7 @@ legend("bottomright", legend=c("Benchmark 1", "Benchmark 2", "Benchmark 3", "Ben
 ```
 
 ```{r}
-xgb.ggplot.importance(xgb.importance(model = tr_xgb1), top_n = 10)
+xgb.ggplot.importance(xgb.importance(model = tr_xgb1))
 xgb.ggplot.importance(xgb.importance(model = tr_xgb2), top_n = 10)
 xgb.ggplot.importance(xgb.importance(model = tr_xgb3), top_n = 10)
 ```
@@ -749,3 +772,131 @@ for (d in all_dir){
 ```
 
 
+```{r}
+tour_path <- interpolate(f_I, 0.1)
+  d <- dim(tour_path)
+  var_std <- false_I #[order(as.data.frame(variable)$Signal_pred, decreasing = FALSE),] 
+  # Remove the brackets when don't want to order
+  var <- read_csv("/home/user1/Desktop/tourr variables/false_I.csv") # enter filename
+  
+  # Put label on 
+  var[, "Signal_pred"] <- if_else(var[, "Signal_pred"]=="2", "FP", "FN")
+  
+  var <- var %>% select(-Signal) #%>% arrange(Signal_pred)
+  mydat <- NULL; myaxes <- NULL
+  
+  for (i in 1:d[3]) {
+    fp <- as.matrix(var_std[,-ncol(var_std)]) %*% matrix(tour_path[,,i], ncol=2)
+    fp <- tourr::center(fp)
+    entry <- matrix(1:nrow(var_std), ncol = 1)
+    fp <- cbind(fp, entry)
+    colnames(fp) <- c("d1", "d2", "Event_Number")
+    mydat <- rbind(mydat, cbind(fp, rep(i, nrow(fp))))
+    fa <- cbind(matrix(0, (ncol(var_std)-1), 2), matrix(tour_path[,,i], ncol=2))
+    colnames(fa) <- c("origin1", "origin2", "d1", "d2") 
+    myaxes <- rbind(myaxes, cbind(fa, rep(i, nrow(fa))))
+  }
+  
+  colnames(mydat)[4] <- "indx"
+  colnames(myaxes)[5] <- "indx"
+  df <- as_tibble(mydat) %>% 
+    mutate(Prediction = rep(var$Signal_pred, d[3]))
+  dfaxes <- as_tibble(myaxes) %>%
+    mutate(labels=rep(colnames(var[,-ncol(var)]), d[3]))
+  numbers <- round(seq(-0.2, 0.2, 0.4/(ncol(var)-1)), 2) # do this to match dimencions in yloc
+  dfaxes_mat <- dfaxes %>%
+    mutate(xloc = rep(max(df$d1)+0.4, d[3]*(ncol(var)-1)), yloc=rep(numbers[-4], d[3]), 
+           coef=paste(round(dfaxes$d1, 2), ", ", round(dfaxes$d2, 2))) #numbers[-4] due to extra entry
+  
+  
+  p <- ggplot(data = dfaxes, aes(frame = indx)) +
+    geom_segment(data=dfaxes, aes(x=d1/2-1.4, xend=origin1-1.4, 
+                                  y=d2/2, yend=origin2), colour="grey70") +
+    geom_text(data=dfaxes, aes(x=d1/2-1.4, y=d2/2, label=labels), colour="grey70") +
+    geom_point(data = df, 
+               aes(x = d1, y = d2, colour=Prediction, text=paste("Event Number:", df$Event_Number)), 
+               size=1, alpha = 1) + # change alpha to change transparency of points
+    scale_colour_manual(values = c("red", "blue")) +
+    theme_void() +
+    coord_fixed() +
+    theme(legend.position="right")
+  
+  pg <- ggplotly(p) %>%
+    animation_opts(150, redraw = FALSE, transition=0) %>%
+    layout(legend = list(orientation = "h", xanchor="center", x=0.5, y = 0.01), yaxis = list(showgrid = F, showline = F),
+           xaxis = list(scaleanchor = "y", scaleratio = 1, showgrid = F, showline =F))
+  pg
+```
+
+
+Save tourr
+```{r}
+htmlwidgets::saveWidget(as_widget(create_animation(t1, "/home/user1/Desktop/tourr variables/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/plotly animation/bm1.html")
+
+htmlwidgets::saveWidget(as_widget(animation_highlighted(t1, "/home/user1/Desktop/tourr variables/var1.csv", var1)), "/home/user1/Desktop/Images for thesis/plotly animation/bm1_highlighted.html")
+
+htmlwidgets::saveWidget(as_widget(animation_FPFN(f1, "/home/user1/Desktop/tourr variables/false1.csv", false1)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn1.html")
+
+htmlwidgets::saveWidget(as_widget(animation_signal(sig1, "/home/user1/Desktop/tourr variables/fntp1.csv", fntp1)), "/home/user1/Desktop/Images for thesis/plotly animation/fntp1.html")
+
+htmlwidgets::saveWidget(as_widget(animation_background(back1, "/home/user1/Desktop/tourr variables/fptn1.csv", fptn1)), "/home/user1/Desktop/Images for thesis/plotly animation/fptn1.html")
+############
+htmlwidgets::saveWidget(as_widget(create_animation(t2, "/home/user1/Desktop/tourr variables/var2.csv", var2)), "/home/user1/Desktop/Images for thesis/plotly animation/bm2.html")
+
+htmlwidgets::saveWidget(as_widget(animation_highlighted(t2, "/home/user1/Desktop/tourr variables/var2.csv", var2)), "/home/user1/Desktop/Images for thesis/plotly animation/bm2_highlighted.html")
+
+htmlwidgets::saveWidget(as_widget(animation_FPFN(f2, "/home/user1/Desktop/tourr variables/false2.csv", false2)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn2.html")
+
+htmlwidgets::saveWidget(as_widget(animation_signal(sig2, "/home/user1/Desktop/tourr variables/fntp2.csv", fntp2)), "/home/user1/Desktop/Images for thesis/plotly animation/fntp2.html")
+
+htmlwidgets::saveWidget(as_widget(animation_background(back2, "/home/user1/Desktop/tourr variables/fptn2.csv", fptn2)), "/home/user1/Desktop/Images for thesis/plotly animation/fptn2.html")
+############
+htmlwidgets::saveWidget(as_widget(create_animation(t3, "/home/user1/Desktop/tourr variables/var3.csv", var3)), "/home/user1/Desktop/Images for thesis/plotly animation/bm3.html")
+
+htmlwidgets::saveWidget(as_widget(animation_highlighted(t3, "/home/user1/Desktop/tourr variables/var3.csv", var3)), "/home/user1/Desktop/Images for thesis/plotly animation/bm3_highlighted.html")
+
+htmlwidgets::saveWidget(as_widget(animation_FPFN(f3, "/home/user1/Desktop/tourr variables/false3.csv", false3)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn3.html")
+
+htmlwidgets::saveWidget(as_widget(animation_signal(sig3, "/home/user1/Desktop/tourr variables/fntp3.csv", fntp3)), "/home/user1/Desktop/Images for thesis/plotly animation/fntp3.html")
+
+htmlwidgets::saveWidget(as_widget(animation_background(back3, "/home/user1/Desktop/tourr variables/fptn3.csv", fptn3)), "/home/user1/Desktop/Images for thesis/plotly animation/fptn3.html")
+###########
+htmlwidgets::saveWidget(as_widget(create_animation(t_I, "/home/user1/Desktop/tourr variables/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/plotly animation/bm_I.html")
+
+htmlwidgets::saveWidget(as_widget(animation_highlighted(t_I, "/home/user1/Desktop/tourr variables/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/plotly animation/bm_I_highlighted.html")
+
+htmlwidgets::saveWidget(as_widget(animation_FPFN(f_I, "/home/user1/Desktop/tourr variables/false_I.csv", false_I)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn_I.html")
+
+htmlwidgets::saveWidget(as_widget(animation_signal(sig_I, "/home/user1/Desktop/tourr variables/fntp_I.csv", fntp_I)), "/home/user1/Desktop/Images for thesis/plotly animation/fntp_I.html")
+
+htmlwidgets::saveWidget(as_widget(animation_background(back_I, "/home/user1/Desktop/tourr variables/fptn_I.csv", fptn_I)), "/home/user1/Desktop/Images for thesis/plotly animation/fptn_I.html")
+
+
+```
+
+
+```{r}
+Variables <- !names(true_split1[[1]]) %in% c("BJet.Mass", "BJet.DeltaPhi", "BJet.DeltaEta", "Jet1.Mass", "Jet1.DeltaPhi", "Jet1.DeltaEta", "Jet2.Mass", "Jet2.DeltaPhi", "Jet2.DeltaEta", "Jet3.Mass", "Jet3.DeltaPhi", "Jet3.DeltaEta")
+true_split <- list(NULL, NULL)
+true_split[[1]] <- true_split1[[1]][,Variables]
+true_split[[2]] <- true_split1[[2]][,Variables]
+part_split <- list(NULL, NULL)
+part_split[[1]] <- true_split1[[1]][,Variables]
+part_split[[2]] <- true_split1[[2]][,Variables]
+xgb_test <- xgb_data(true_split, part_split)
+
+tr_test <- xgb.train(booster = "gbtree", objective = "binary:logistic", data = xgb_test[[1]], nrounds = 500, max_depth = 6, eval_metric = "logloss", n_estimators = 500, gamma = 0, alpha = 0)
+
+pred_test <- predict(tr_test, xgb_test[[2]])
+
+for (i in 1:NROW(pred_test)){
+  if (pred_test[i] > 0.75){
+       pred_test[i] = 1
+     } else {
+       pred_test[i] = 0
+     }
+}
+
+confusionMatrix(table(pred_test, true_split[[2]]$Signal))
+xgb.ggplot.importance(xgb.importance(model=tr_test))
+```

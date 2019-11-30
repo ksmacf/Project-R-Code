@@ -22,6 +22,12 @@ for (i in 1:NROW(pred_test2)){
 }
 confusionMatrix(table(pred_test2, true_split2[[2]]$Signal))
 # Preliminary results show around 0.935
+
+true_split2[[1]] <- true_split2[[1]][,Variables]
+true_split2[[2]] <- true_split2[[2]][,Variables]
+part_split2[[1]] <- part_split2[[1]][,Variables]
+part_split2[[2]] <- part_split2[[2]][,Variables]
+
 ```
 
 2) Benchmark 2 ($\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV)
@@ -54,10 +60,10 @@ xgbpred2 <- predict(tr_xgb2, xgb_bm2[[2]])
 check_data2 <- true_split2[[2]] %>% mutate(Signal_pred = xgbpred2, Signal = as.factor(Signal))
 distribution(check_data2, "Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $\\tilde{\\chi}_1^0 = 400 $ GeV")
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
-check_data2 <- assign_label(check_data2, 0.6)
+check_data2 <- assign_label(check_data2, 0.75)
 confusionMatrix(table(check_data2$Signal_pred, check_data2$Signal)) # Cut-off at 0.5 showed about the same (0.942)
 
-b2_vals <- Values(check_data2$Signal_pred, true_split2, Data_Benchmark02, 2.877)
+b2_vals <- Values(check_data2$Signal_pred, true_split2, Data_Benchmark02, 0.4042)
 b2_vals
 ```
 
@@ -83,7 +89,9 @@ X11()
 animate_xy(var2[,-6], planned_tour(t2), col = col_v2[,3], fps = 50, axes = "bottomleft") 
 X11()
 
-htmlwidgets::saveWidget(as_widget(create_animation(t2, "/home/user1/Desktop/tourr variables/var2.csv", var2)), "/home/user1/Desktop/Images for thesis/tourr/plotly animation/bm2.html")
+htmlwidgets::saveWidget(as_widget(create_animation(t2, "/home/user1/Desktop/tourr variables/var2.csv", var2)), "/home/user1/Desktop/Images for thesis/plotly animation/bm2.html")
+
+htmlwidgets::saveWidget(as_widget(animation_highlighted(t2, "/home/user1/Desktop/tourr variables/var2.csv", var2)), "/home/user1/Desktop/Images for thesis/plotly animation/bm2_highlighted.html")
 
 # Save the tour plot
 render(var2[,-6], planned_tour(t2), display_xy(col = col_v2), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm2/bm2_3-%03d.png")
@@ -120,7 +128,7 @@ false2 <- read_csv("/home/user1/Desktop/tourr variables/var2.csv")
 false2 <- subset(false2, col_v2[,1]!=col_v2[,2])
 col_f2 <- if_else(false2$Signal_pred=="2", "red", "blue") # blue is FN, red is FP
 write_csv(as.data.frame(false2), "/home/user1/Desktop/tourr variables/false2.csv")
-false3 <- rescale(select(false2, -"Signal"))
+false2 <- rescale(select(false2, -"Signal"))
 
 f2 <- save_history(false2[,-ncol(false2)], guided_tour(ashapetour(cl = col_f2, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
@@ -128,7 +136,8 @@ X11()
 animate_xy(false2[,-ncol(false2)], planned_tour(f2), col = col_f2, fps = 50)
 X11()
 
-animation_FPFN(f2, "/home/user1/Desktop/tourr variables/false2.csv", false2)
+htmlwidgets::saveWidget(as_widget(animation_FPFN(f2, "/home/user1/Desktop/tourr variables/false2.csv", false2)), "/home/user1/Desktop/Images for thesis/tourr/plotly animation/fpfn2.html")
+
 ```
 
 Only for the signal points
@@ -137,7 +146,7 @@ fntp2 <- read_csv("/home/user1/Desktop/tourr variables/var2.csv")
 fntp2 <- subset(fntp2, fntp2[,"Signal"]=="1")
 write_csv(as.data.frame(fntp2), "/home/user1/Desktop/tourr variables/fntp2.csv")
 col_sig2 <- if_else(fntp2$Signal_pred=="3", "red", "blue") # blue is TP, red is FN
-fntp3 <- rescale(select(fntp2, -"Signal"))
+fntp2 <- rescale(select(fntp2, -"Signal"))
 
 sig2 <- save_history(fntp2[,-ncol(fntp2)], guided_tour(ashapetour(cl = col_sig2, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
@@ -145,7 +154,8 @@ X11()
 animate_xy(fntp2[,-ncol(fntp2)], planned_tour(sig2), col = col_sig2, fps = 50)
 X11()
 
-animation_signal(sig2, "/home/user1/Desktop/tourr variables/fntp2.csv", fntp2)
+htmlwidgets::saveWidget(as_widget(animation_signal(sig2, "/home/user1/Desktop/tourr variables/fntp2.csv", fntp2)), "/home/user1/Desktop/Images for thesis/plotly animation/fntp2.html")
+
 ```
 
 
@@ -153,17 +163,18 @@ Only for the background points
 ```{r}
 fptn2 <- read_csv("/home/user1/Desktop/tourr variables/var2.csv")
 fptn2 <- subset(fptn2, fptn2[,"Signal"]=="0")
-write_csv(as.data.frame(fptn2), "/home/user1/Desktop/tourr variables/fptn3.csv")
-col_back3 <- if_else(fptn2$Signal_pred=="2", "red", "blue") # blue is TN, red is FP
-fptn3 <- rescale(select(fptn2, -"Signal"))
+write_csv(as.data.frame(fptn2), "/home/user1/Desktop/tourr variables/fptn2.csv")
+col_back2 <- if_else(fptn2$Signal_pred=="2", "red", "blue") # blue is TN, red is FP
+fptn2 <- rescale(select(fptn2, -"Signal"))
 
 back2 <- save_history(fptn2[,-ncol(fptn2)], guided_tour(ashapetour(cl = col_back2, alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
 X11()
-animate_xy(fptn2[,-ncol(fptn2)], planned_tour(back3), col = col_back2, fps = 50)
+animate_xy(fptn2[,-ncol(fptn2)], planned_tour(back2), col = col_back2, fps = 50)
 X11()
 
-animation_background(back2, "/home/user1/Desktop/tourr variables/fptn2.csv", fptn2)
+htmlwidgets::saveWidget(as_widget(animation_background(back2, "/home/user1/Desktop/tourr variables/fptn2.csv", fptn2)), "/home/user1/Desktop/Images for thesis/plotly animation/fptn2.html")
+
 ```
 
 Create a gif
