@@ -62,7 +62,7 @@ xgbpred1 <- predict(tr_xgb1, xgb_bm1[[2]])
 
 
 check_data1 <- true_split1[[2]] %>% mutate(Signal_pred = xgbpred1, Signal = as.factor(Signal))
-distribution(check_data1, "Distribution of predicted events with $\\tilde{t}=1.2$ TeV and $\\tilde{\\chi}_1^0=600$ GeV") # CANNOT RUN WHEN PLOTLY IS LOADED
+distribution(check_data1, "Distribution of predicted events with $m_{\\tilde{t}}=1.2$ TeV and $m_{\\tilde{\\chi}_1^0}=600$ GeV") # CANNOT RUN WHEN PLOTLY IS LOADED
 
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 check_data1 <- assign_label(check_data1, 0.75)

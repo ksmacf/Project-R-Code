@@ -56,7 +56,7 @@ tr_xgb3 <- xgb.train(params = best_param,
 xgbpred3 <- predict(tr_xgb3, xgb_bm3[[2]])
 
 check_data3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3, Signal = as.factor(Signal))
-distribution(check_data3, "Distribution of predicted events with $\\tilde{t} = 1.25$ TeV and $\\tilde{\\chi}_1^0 = 100$ GeV")
+distribution(check_data3, "Distribution of predicted events with $m_{\\tilde{t}} = 1.25$ TeV and $m_{\\tilde{\\chi}_1^0} = 100$ GeV")
 
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 check_data3 <- assign_label(check_data3, 0.75)
@@ -69,8 +69,8 @@ b3_vals
 
 Visualisation using tourr
 ```{r}
-var3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split3[[2]])/10)
-var3 <- assign_label(var3, 0.6)
+var3 <- true_split3[[2]] %>% mutate(Signal_pred = xgbpred3) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "BJet.PT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split3[[2]])/10)
+var3 <- assign_label(var3, 0.75)
 #write_csv(var1, "/home/user1/Desktop/var1.csv")
 col_v3 <- group_color(var3)   
 var3[col_v3[,1]!=col_v3[,2],"Signal_pred"] <- if_else(col_v3[col_v3[,1]!=col_v3[,2],1]=="black", 2, 3)  
@@ -78,14 +78,16 @@ var3[col_v3[,1]!=col_v3[,2],"Signal_pred"] <- if_else(col_v3[col_v3[,1]!=col_v3[
 write_csv(as.data.frame(var3), "/home/user1/Desktop/tourr variables/var3.csv")
 
 # Rescale
-var3 <- rescale(var3[,-6])
+var3 <- rescale(var3[,-(ncol(var3)-1)])
+
+col_v3f <- false_color(col_v3[,3])
 
 # Save tour history
-oldseed <- .Random.seed
-t3 <- save_history(var3[,-6], guided_tour(ashapetour(cl = col_v3[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+#oldseed <- get.seed
+t3 <- save_history(var3[,-ncol(var3)], guided_tour(ashapetour(cl = col_v3[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
 X11()
-animate_xy(var3[,-6], planned_tour(t3), col = col_v3[,3], fps = 50)
+animate_xy(var3[,-ncol(var3)], planned_tour(t3), col = col_v3[,3], fps = 50, axes = "bottomleft" )
 X11()
 #order(as.data.frame(var3)$Signal_pred, decreasing = FALSE)
 
@@ -94,7 +96,7 @@ htmlwidgets::saveWidget(as_widget(create_animation(t3, "/home/user1/Desktop/tour
 htmlwidgets::saveWidget(as_widget(animation_highlighted(t3, "/home/user1/Desktop/tourr variables/var3.csv", var3)), "/home/user1/Desktop/Images for thesis/plotly animation/bm3_highlighted.html")
 
 # Save the tour plot  
-render(var3[,-6], planned_tour(t3), display_xy(col = col_v3[,3]), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm3/bm3_proper-%03d.png")
+render(var3[,-ncol(var3)], planned_tour(t3), display_xy(col = col_v3[,3], axes = "bottomleft"), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm3/proper/bm3_proper-%03d.png")
 # pdf version actually captures the whole path
 ```
 
@@ -126,15 +128,20 @@ Only the misclassified points
 false3 <- read_csv("/home/user1/Desktop/tourr variables/var3.csv")
 false3 <- subset(false3, col_v3[,1]!=col_v3[,2])
 
-col_f3 <- if_else(false3$Signal_pred=="2", "red", "blue") # blue is FN, red is FP
+col_f3 <- if_else(false3$Signal_pred=="2", "blue", "red") # blue is FP, red is FN
 write_csv(as.data.frame(false3), "/home/user1/Desktop/tourr variables/false3.csv")
 false3 <- rescale(select(false3, -"Signal"))
 
-f3 <- save_history(false3[,-ncol(false3)], guided_tour(ashapetour(cl = col_f3, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+f3 <- save_history(false3[,-ncol(false3)], guided_tour(ashapetour(cl = col_f3, alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
 X11()
-animate_xy(false3[,-ncol(false3)], planned_tour(f3), col = col_f3, fps = 50)
+animate_xy(false3[,-ncol(false3)], planned_tour(t3), col = col_f3, fps = 50)
 X11()
+# "#00000000"
+
+render(false3[,-ncol(false3)], planned_tour(f3), display_xy(col = "#00000000"),frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm3/false/bm3_false_axis.png")
+
+
 
 htmlwidgets::saveWidget(as_widget(animation_FPFN(f3, "/home/user1/Desktop/tourr variables/false3.csv", false3)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn3.html")
 

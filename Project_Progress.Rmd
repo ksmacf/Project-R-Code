@@ -33,7 +33,7 @@ library(varComp)
 library(gifski)
 library(htmlwidgets)
 rm(list = ls(all.names = TRUE))
-load("/home/user1/Desktop/Project-Environment.RData")
+load("/home/user1/Desktop/Project-Environment_Updated.RData")
 ```
 
 Create functions for repeated processes.
@@ -312,6 +312,8 @@ distribution <- function(Data, Title){
     geom_histogram(bins = 50, alpha=.5, position="identity") +
     scale_y_continuous(trans = 'log10') +
     labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type") +
+    scale_fill_discrete(labels = c("Background", "Signal")) +
+    theme(legend.position = c(0.5, 0.9), legend.direction = "horizontal") +
     ggtitle(TeX(Title))
 }
 
@@ -349,6 +351,20 @@ group_color <- function(variables){
   return(col)
 }
 
+false_color <- function(variable){
+  for (i in 1:NROW(variable)){
+  if (variable[i]=="blue"){
+    variable[i] = "#d9252533" 
+  } else if (variable[i]=="black") {
+    variable[i]= "#1a73e833"
+  } else if (variable[i]=="green") {
+    variable[i] = "blue"
+  } else {
+    variable[i]== variable[i]
+  }
+  }
+  return(variable)
+}
 ```
 
 
@@ -657,9 +673,9 @@ legend("bottomright", legend=c("Benchmark 1", "Benchmark 2", "Benchmark 3", "Ben
 ```
 
 ```{r}
-xgb.ggplot.importance(xgb.importance(model = tr_xgb1))
-xgb.ggplot.importance(xgb.importance(model = tr_xgb2), top_n = 10)
-xgb.ggplot.importance(xgb.importance(model = tr_xgb3), top_n = 10)
+xgb.ggplot.importance(xgb.importance(model = tr_xgb1)) + ggplot2::ylab("Gain") + ggplot2::ggtitle(TeX("Feature Importance for Benchmark1: $m_{\\tilde{t}}=1.2$ TeV and $m_{\\tilde{\\chi}_1^0}=600$ GeV")) + ggplot2::theme(legend.position = c(0.8, 0.5)) 
+xgb.ggplot.importance(xgb.importance(model = tr_xgb2)) + ggplot2::ylab("Gain") + ggplot2::ggtitle(TeX("Feature Importance for Benchmark2: $m_{\\tilde{t}}=1.225$ TeV and $m_{\\tilde{\\chi}_1^0}=400$ GeV")) + ggplot2::theme(legend.position = c(0.8, 0.5))
+xgb.ggplot.importance(xgb.importance(model = tr_xgb3)) + ggplot2::ylab("Gain") + ggplot2::ggtitle(TeX("Feature Importance for Benchmark3: $m_{\\tilde{t}}=1.25$ TeV and $m_{\\tilde{\\chi}_1^0}=100$ GeV")) + ggplot2::theme(legend.position = c(0.8, 0.5))
 ```
 
 Using the spinebil function to see how the index performs
@@ -899,4 +915,62 @@ for (i in 1:NROW(pred_test)){
 
 confusionMatrix(table(pred_test, true_split[[2]]$Signal))
 xgb.ggplot.importance(xgb.importance(model=tr_test))
+```
+
+
+```{r}
+
+ ggplot(check_data_I, aes(x = Signal_pred, fill = Signal)) +
+    geom_histogram(bins = 50, alpha=.5, position="identity") +
+    scale_y_continuous(trans = 'log10') +
+    labs(y = "Number of Events", x = "Predicted Values", fill = "Signal Type") +
+    scale_fill_discrete(labels = c("Background", "Signal")) +
+    theme(legend.position = c(0.5, 0.9), legend.direction = "horizontal") 
+    #ggtitle(TeX(Title))
+
+```
+
+```{r}
+observe3_f[200,]
+
+test <- observe3 %>% mutate(
+  ML_Delta.Phi = abs(abs(MissingET.Phi) - abs(Lepton.Phi)),
+  Signal = if_else(Signal=="1", "Signal", "Background")
+)
+
+ggplot(test, aes(x = ML_Delta.Phi, fill = Signal)) +
+  geom_histogram(bins = 50, alpha=.5, position = "identity") +
+  #geom_histogram(data = test2, aes(x = ML_Delta.Phi, fill = Signal))+
+  labs(y = "Number of Events", x = TeX("$\\Delta\\phi(E_T^{Miss},l)$"), fill = "Signal Type") +
+  scale_colour_manual(labels = c("Background-like", "Signal-like")) +
+  theme(legend.position = c(0.8, 0.6)) +
+  ggtitle(TeX("Distribution of "))
+
+test2 <- true_split_I[[2]] %>% mutate(Signal_pred = xgbpred_I) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "BJet.PT", "Signal", "Signal_pred") %>% mutate(
+  ML_Delta.Phi = abs(abs(MissingET.Phi) - abs(Lepton.Phi))
+) 
+
+test2 <- assign_label(test2, 0.75)
+test2[test2[,"Signal"]!=test2[,"Signal_pred"],"Signal_pred"] <- if_else(test2[test2[,"Signal"]!=test2[,"Signal_pred"],"Signal_pred"]=="1", 2, 3)  
+
+for (i in 1:NROW(test2)) {
+    if (test2$Signal_pred[i]=="1"){
+      test2$Signal_pred[i] = "True Positive"
+    } else if (test2$Signal_pred[i]=="0") {
+      test2$Signal_pred[i] = "True Negative"
+    } else if (test2$Signal_pred[i]=="2") {
+      test2$Signal_pred[i] = "False Positive"
+    } else {
+      test2$Signal_pred[i] = "False Negative"
+    }
+}
+
+#subset(test2, Signal_pred=="False Positive" | Signal_pred=="False Negative")
+ggplot(test2, aes(x = ML_Delta.Phi, fill = Signal_pred)) +
+  geom_histogram(bins = 50, alpha=.5, position = "identity") +
+  #geom_histogram(data = test2, aes(x = ML_Delta.Phi, fill = Signal))+
+  labs(y = "Number of Events", x = TeX("$\\Delta\\phi(E_T^{Miss},l)$"), fill = "Signal Type") +
+  #scale_colour_manual(labels = c("Background-like", "Signal-like")) +
+  theme(legend.position = c(0.8, 0.6)) +
+  ggtitle(TeX("Distribution of "))
 ```

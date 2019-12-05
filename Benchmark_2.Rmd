@@ -45,7 +45,7 @@ pred_test2 <- predict(tr_test2, xgb_bm2[[4]])
 
 # Do a check to see what is a good cut-off
 check <- part_split2[[2]] %>% mutate(Signal_pred = pred_test2, Signal = as.factor(Signal))
-distribution(check, "Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $ \\chi_1^0 = 400 $ GeV - Preliminary")
+distribution(check, "Distribution of predicted events with $m_{\\tilde{t}} = 1.225$ TeV and $ m_{\\tilde{\\chi_1^0}} = 400 $ GeV - Preliminary")
 check <- assign_label(check, 0.5)
 confusionMatrix(table(check$Signal_pred, check$Signal)) # Showed about 0.942
 rm(check)
@@ -58,7 +58,7 @@ tr_xgb2 <- xgb.train(params = best_param,
 xgbpred2 <- predict(tr_xgb2, xgb_bm2[[2]])
 
 check_data2 <- true_split2[[2]] %>% mutate(Signal_pred = xgbpred2, Signal = as.factor(Signal))
-distribution(check_data2, "Distribution of predicted events with $\\tilde{t} = 1.225$ TeV and $\\tilde{\\chi}_1^0 = 400 $ GeV")
+distribution(check_data2, "Distribution of predicted events with $m_{\\tilde{t}} = 1.225$ TeV and $m_{\\tilde{\\chi}_1^0} = 400 $ GeV")
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 check_data2 <- assign_label(check_data2, 0.75)
 confusionMatrix(table(check_data2$Signal_pred, check_data2$Signal)) # Cut-off at 0.5 showed about the same (0.942)

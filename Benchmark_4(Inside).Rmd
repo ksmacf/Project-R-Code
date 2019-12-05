@@ -55,7 +55,7 @@ tr_xgb_I <- xgb.train(params = best_param,
 xgbpred_I <- predict(tr_xgb_I, xgb_bm_I[[2]])
 
 check_data_I <- true_split_I[[2]] %>% mutate(Signal_pred = xgbpred_I, Signal = as.factor(Signal))
-distribution(check_data_I, "Distribution of predicted events with $\\tilde{t} = 750$ GeV and $\\tilde{\\chi}_1^0 = 1 $ GeV")
+distribution(check_data_I, "Distribution of predicted events with $m_{\\tilde{t}} = 750$ GeV and $m_{\\tilde{\\chi}_1^0} = 1 $ GeV")
 
 # Create Confusion Matrix based on the best possible cut-off seen in the plot (roughly 100 Events or less with Backgrounds is good I think)
 check_data_I <- assign_label(check_data_I, 0.75)
@@ -74,12 +74,12 @@ roc(true_split_I[[2]]$Signal, pred_test_I,
     ci = TRUE, ci.alpha = 0.9, stratified = FALSE,
     auc = TRUE, grid=TRUE, print.auc=TRUE, print.auc.x = 70, print.auc.y = 55, show.thres=TRUE)
 
-xgb.ggplot.importance(xgb.importance(model = tr_xgb_I), top_n = 10)
+xgb.ggplot.importance(xgb.importance(model = tr_xgb_I)) + ggplot2::ylab("Gain") + ggplot2::ggtitle(TeX("Feature Importance for Benchmark4: $m_{\\tilde{t}}=750$ GeV and $m_{\\tilde{\\chi}_1^0}=1$ GeV")) + ggplot2::theme(legend.position = c(0.8, 0.5))
 ```
 
 ```{r}
 var_I <- true_split_I[[2]] %>% mutate(Signal_pred = xgbpred_I) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "BJet.PT", "Signal", "Signal_pred") %>% sample_n(NROW(true_split_I[[2]])/10)
-var_I <- assign_label(var_I, 0.6)
+var_I <- assign_label(var_I, 0.75)
 
 col_I <- group_color(var_I)   
 var_I[col_I[,1]!=col_I[,2],"Signal_pred"] <- if_else(col_I[col_I[,1]!=col_I[,2],1]=="black", 2, 3)  
@@ -87,21 +87,24 @@ var_I[col_I[,1]!=col_I[,2],"Signal_pred"] <- if_else(col_I[col_I[,1]!=col_I[,2],
 write_csv(var_I, "/home/user1/Desktop/tourr variables/var_I.csv")
 
 # Rescale
-var_I <- rescale(var_I[,-8])
+var_I <- rescale(var_I[,-(ncol(var_I)-1)])
+
+col_I_f <- false_color(col_I[,3])
 
 # Save tour history
-t_I <- save_history(var_I[,-8], guided_tour(ashapetour(cl = col_I[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+t_I <- save_history(var_I[,-ncol(var_I)], guided_tour(ashapetour(cl = col_I[,3], alpha = 0.4, hull_var = c("black")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
 X11()
-animate_xy(var_I[,-8], planned_tour(t_I), col = col_I[,3], fps = 50)
+animate_xy(var_I[,-ncol(var_I)], planned_tour(t_I), col = col_I_f, fps = 50)
 X11()
+# use col = "#00000000" for transparency (to get JUST the axis)
   
 htmlwidgets::saveWidget(as_widget(create_animation(t_I, "/home/user1/Desktop/tourr variables/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/plotly animation/bm_I.html")
 
 htmlwidgets::saveWidget(as_widget(animation_highlighted(t_I, "/home/user1/Desktop/tourr variables/var_I.csv", var_I)), "/home/user1/Desktop/Images for thesis/plotly animation/bm_I_highlighted.html")
 
 # Save the tour plot
-render(var_I[,-8], planned_tour(t_I), display_xy(col = col_I[,3]), frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm_I/proper/bm_I_proper-%03d.png")
+render(var_I[,-ncol(var_I)], planned_tour(t_I), display_xy(col = col_I_f, axes = "bottomleft"),frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm_I/proper_highlight/bm_I_proper_highlighted-%03d.png")
 # pdf version actually captures the whole path
 ```
 
@@ -134,15 +137,19 @@ Only the misclassified points
 false_I <- read_csv("/home/user1/Desktop/tourr variables/var_I.csv")
 false_I <- subset(false_I, col_I[,1]!=col_I[,2])
 
-col_f_I <- if_else(false_I$Signal_pred=="2", "red", "blue") # blue is FN, red is FP
+col_f_I <- if_else(false_I$Signal_pred=="2", "blue", "red") # blue is FP, red is FN
 write_csv(as.data.frame(false_I), "/home/user1/Desktop/tourr variables/false_I.csv")
 false_I <- rescale(select(false_I, -"Signal"))
 
-f_I <- save_history(false_I[,-ncol(false_I)], guided_tour(ashapetour(cl = col_f_I, alpha = 0.4, hull_var = c("red")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
+f_I <- save_history(false_I[,-ncol(false_I)], guided_tour(ashapetour(cl = col_f_I, alpha = 0.4, hull_var = c("blue")), search_f = tourr:::search_better, alpha = pi/2, cooling = 0.5), step_size = Inf)
 
 X11()
-animate_xy(false_I[,-ncol(false_I)], planned_tour(f_I), col = col_f_I, fps = 50)
+animate_xy(false_I[,-ncol(false_I)], planned_tour(f_I), col = "#00000000", fps = 50)
 X11()
+# "#00000000"
+
+render(false_I[,-ncol(false_I)], planned_tour(f_I), display_xy(col = "#00000000"),frames = 50, "png", "/home/user1/Desktop/Images for thesis/tourr/bm_I/false/bm_I_false_axis.png")
+
 
 htmlwidgets::saveWidget(as_widget(animation_FPFN(f_I, "/home/user1/Desktop/tourr variables/false_I.csv", false_I)), "/home/user1/Desktop/Images for thesis/plotly animation/fpfn_I.html")
 
