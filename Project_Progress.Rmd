@@ -930,6 +930,8 @@ xgb.ggplot.importance(xgb.importance(model=tr_test))
 
 ```
 
+
+Get$\Delta\phi(E_T^{Miss},l)$
 ```{r}
 observe3_f[200,]
 
@@ -946,31 +948,62 @@ ggplot(test, aes(x = ML_Delta.Phi, fill = Signal)) +
   theme(legend.position = c(0.8, 0.6)) +
   ggtitle(TeX("Distribution of "))
 
-test2 <- true_split_I[[2]] %>% mutate(Signal_pred = xgbpred_I) %>% select("MissingET.MET", "MissingET.Phi", "Lepton.PT", "Lepton.Phi", "ScalarHT.HT", "Jet1.PT", "BJet.PT", "Signal", "Signal_pred") %>% mutate(
-  ML_Delta.Phi = abs(abs(MissingET.Phi) - abs(Lepton.Phi))
-) 
 
-test2 <- assign_label(test2, 0.75)
-test2[test2[,"Signal"]!=test2[,"Signal_pred"],"Signal_pred"] <- if_else(test2[test2[,"Signal"]!=test2[,"Signal_pred"],"Signal_pred"]=="1", 2, 3)  
 
-for (i in 1:NROW(test2)) {
-    if (test2$Signal_pred[i]=="1"){
-      test2$Signal_pred[i] = "True Positive"
-    } else if (test2$Signal_pred[i]=="0") {
-      test2$Signal_pred[i] = "True Negative"
-    } else if (test2$Signal_pred[i]=="2") {
-      test2$Signal_pred[i] = "False Positive"
-    } else {
-      test2$Signal_pred[i] = "False Negative"
-    }
-}
+data_phi <- rbind(true_split_I[[1]], true_split_I[[2]]) %>% 
+  mutate(
+    ML_Delta.Phi = abs(abs(MissingET.Phi) - abs(Lepton.Phi)),
+    Signal_Type = if_else(Signal=="1", "Signal", "Background")
+  )
+data_phi <- data_phi[,Variables]
+#test2 <- assign_label(test2, 0.75)
+#test2[test2[,"Signal"]!=test2[,"Signal_pred"],"Signal_pred"] <- if_else(test2[test2[,"Signal"]!=test2[,"Signal_pred"],"Signal_pred"]=="1", 2, 3)  
+
+#for (i in 1:NROW(test2)) {
+#    if (test2$Signal_pred[i]=="1"){
+#      test2$Signal_pred[i] = "True Positive"
+#    } else if (test2$Signal_pred[i]=="0") {
+#      test2$Signal_pred[i] = "True Negative"
+#    } else if (test2$Signal_pred[i]=="2") {
+#      test2$Signal_pred[i] = "False Positive"
+#    } else {
+#      test2$Signal_pred[i] = "False Negative"
+#    }
+#}
 
 #subset(test2, Signal_pred=="False Positive" | Signal_pred=="False Negative")
-ggplot(test2, aes(x = ML_Delta.Phi, fill = Signal_pred)) +
+ggplot(data_phi, aes(x = ML_Delta.Phi, fill = Signal_Type)) +
   geom_histogram(bins = 50, alpha=.5, position = "identity") +
   #geom_histogram(data = test2, aes(x = ML_Delta.Phi, fill = Signal))+
-  labs(y = "Number of Events", x = TeX("$\\Delta\\phi(E_T^{Miss},l)$"), fill = "Signal Type") +
+  labs(y = "Number of Events", x = TeX("$\\Delta\\phi(E_T^{Miss}, l)$"), fill = "Signal Type") +
   #scale_colour_manual(labels = c("Background-like", "Signal-like")) +
   theme(legend.position = c(0.8, 0.6)) +
-  ggtitle(TeX("Distribution of "))
+  ggtitle(TeX("Distribution of $\\Delta\\phi(E_T^{Miss}, l)$ for Benchmark 4: $m_{\\tilde{t}} = 750$ GeV and $m_{\\tilde{\\chi}_1^0} = 1$ GeV"))
+
+#inner_join(as.data.frame(read_csv("/home/user1/Desktop/tourr variables/false_I.csv")), data_phi)
+```
+
+
+
+```{r}
+
+observe_I <- inner_join(as.data.frame(read_csv("/home/user1/Desktop/tourr variables/var_I.csv")),
+                        data_phi)
+observe_I_f <- inner_join(as.data.frame(read_csv("/home/user1/Desktop/tourr variables/false_I.csv")),
+                          data_phi)
+
+observe3 <- inner_join(as.data.frame(read_csv("/home/user1/Desktop/tourr variables/var3.csv")), 
+                       data_phi)
+observe3_f <- inner_join(as.data.frame(read_csv("/home/user1/Desktop/tourr variables/false3.csv")),
+                         data_phi)
+
+#var[, "Signal_pred"] <- if_else(fuck[, "Signal_pred"]=="2", "FP", "FN")
+
+observe_I_f[,"Signal"]==fuck[,"Signal"]
+
+observe3_f[330,]
+
+observe_I_f[22,]
+
+fuck[533,]
 ```
